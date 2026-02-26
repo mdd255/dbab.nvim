@@ -18,3 +18,5 @@ luacov.report.out
 .nvim.lua
 .nvimrc
 .exrc
+config.bat
+node_modules
