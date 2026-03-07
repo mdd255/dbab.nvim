@@ -6,7 +6,7 @@ local M = {
   mariadb        = "",
   sqlite         = "",
   redis          = "",
-  mongodb        = "",
+  mongodb        = "",
   db_default     = "󰆼",
 
   -- sidebar tree

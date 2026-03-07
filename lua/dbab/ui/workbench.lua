@@ -622,7 +622,9 @@ function M.create_new_tab(name, content, conn_name, is_saved)
   M.active_tab = #M.query_tabs
 
   -- Setup buffer
-  vim.api.nvim_buf_set_option(buf, "filetype", "sql")
+  local resolved_url = connection.get_active_url()
+  local ft = (resolved_url and connection.parse_type(resolved_url) == "mongodb") and "javascript" or "sql"
+  vim.api.nvim_buf_set_option(buf, "filetype", ft)
   vim.api.nvim_buf_set_option(buf, "buftype", "acwrite") -- allows :w via BufWriteCmd
   vim.api.nvim_buf_set_option(buf, "swapfile", false)
 
@@ -1095,6 +1097,27 @@ function M.show_result(raw, elapsed)
 
   pcall(vim.treesitter.stop, M.result_buf)
   vim.api.nvim_buf_set_option(M.result_buf, "filetype", "")
+
+  -- MongoDB: render raw output with jsonc syntax highlighting
+  local active_url = connection.get_active_url()
+  if active_url and connection.parse_type(active_url) == "mongodb" then
+    local raw_lines = vim.tbl_filter(function(line)
+      -- Strip mongosh prompt remnants (e.g. "dbname> ", "test> ")
+      if line:match("^%w+> ") or line:match("^%w+>$") then return false end
+      return true
+    end, vim.split(raw, "\n"))
+    vim.api.nvim_buf_set_lines(M.result_buf, 0, -1, false, raw_lines)
+    vim.api.nvim_buf_set_option(M.result_buf, "modifiable", false)
+    local ok = pcall(vim.treesitter.start, M.result_buf, "jsonc")
+    if not ok then
+      vim.api.nvim_buf_set_option(M.result_buf, "filetype", "jsonc")
+    end
+    M.last_result = result
+    M.refresh_result_winbar()
+    local status = string.format(" Result (%.1fms) ", elapsed)
+    vim.notify(status, vim.log.levels.INFO)
+    return
+  end
 
   if result.row_count == 0 then
     vim.api.nvim_buf_set_lines(M.result_buf, 0, -1, false, { "No results returned" })

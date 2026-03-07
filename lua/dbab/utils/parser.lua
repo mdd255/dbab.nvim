@@ -121,7 +121,11 @@ function M.parse_table(raw)
   local lines = vim.split(raw, "\n")
 
   lines = vim.tbl_filter(function(line)
-    return not line:match("^mysql: %[Warning%]")
+    if line:match("^mysql: %[Warning%]") then return false end
+    -- Strip mongosh noise: type annotations and prompt remnants
+    if line:match("^%w+> ") then return false end
+    if line == "" then return true end
+    return true
   end, lines)
 
   local result = {
