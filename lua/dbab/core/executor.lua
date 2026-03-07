@@ -26,15 +26,15 @@ local function cli_execute(url, query)
   end
 
   -- MongoDB: pass query via --eval to avoid REPL prompt noise
-  local stdin = query
   if connection.parse_type(url) == "mongodb" then
     table.insert(cmd_list, "--eval")
     table.insert(cmd_list, query)
-    stdin = nil
+    local lines = vim.fn.systemlist(cmd_list)
+    return table.concat(lines, "\n")
   end
 
   -- Use list form to avoid shell expansion (e.g. '?' in URLs under zsh)
-  local lines = vim.fn.systemlist(cmd_list, stdin)
+  local lines = vim.fn.systemlist(cmd_list, query)
   return table.concat(lines, "\n")
 end
 
@@ -58,20 +58,18 @@ local function cli_execute_async(url, query, callback)
   local command, args = adapter.build_cmd(url)
 
   -- MongoDB: pass query via --eval to avoid REPL prompt noise
-  local writer = query
-  if connection.parse_type(url) == "mongodb" then
+  local is_mongodb = connection.parse_type(url) == "mongodb"
+  if is_mongodb then
     table.insert(args, "--eval")
     table.insert(args, query)
-    writer = nil
   end
 
   local stdout_results = {}
   local stderr_results = {}
 
-  Job:new({
+  local job_opts = {
     command = command,
     args = args,
-    writer = writer,
     on_stdout = function(_, data)
       if data then
         table.insert(stdout_results, data)
@@ -94,7 +92,11 @@ local function cli_execute_async(url, query, callback)
         end
       end)
     end,
-  }):start()
+  }
+  if not is_mongodb then
+    job_opts.writer = query
+  end
+  Job:new(job_opts):start()
 end
 
 -- ============================================
