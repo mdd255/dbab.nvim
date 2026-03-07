@@ -630,8 +630,8 @@ function M.create_new_tab(name, content, conn_name, is_saved)
   vim.api.nvim_buf_set_option(buf, "buftype", "acwrite") -- allows :w via BufWriteCmd
   vim.api.nvim_buf_set_option(buf, "swapfile", false)
 
-  local display_name = is_saved and tab_name or ("*" .. tab_name)
-  pcall(vim.api.nvim_buf_set_name, buf, "[DB] " .. display_name .. " - " .. conn)
+  local display_name = is_saved and tab_name or (tab_name .. "*" )
+  pcall(vim.api.nvim_buf_set_name, buf, "[" .. conn .. "] " .. display_name)
 
   -- Set content
   local lines = content and vim.split(content, "\n") or { "" }
