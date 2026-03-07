@@ -49,7 +49,9 @@ end, {
     elseif args[2] == "connect" then
       local dbab = require("dbab")
       local connections = dbab.core.connection.list_connections()
-      local names = vim.tbl_map(function(c) return c.name end, connections)
+      local names = vim.tbl_map(function(c)
+        return c.name
+      end, connections)
       return vim.tbl_filter(function(s)
         return s:match("^" .. arg_lead)
       end, names)

@@ -38,8 +38,8 @@ function M.setup()
   -- Fallback colors if Normal bg is not available
   local row_odd_bg, row_even_bg
   if normal_bg then
-    row_odd_bg = adjust_color(normal_bg, -10, 15)  -- darker + blue tint
-    row_even_bg = adjust_color(normal_bg, 5, 25)   -- lighter + more blue tint
+    row_odd_bg = adjust_color(normal_bg, -10, 15) -- darker + blue tint
+    row_even_bg = adjust_color(normal_bg, 5, 25) -- lighter + more blue tint
   else
     -- Fallback: use CursorLine bg or hardcoded dark colors
     local cursorline = vim.api.nvim_get_hl(0, { name = "CursorLine" })

@@ -52,7 +52,9 @@ function M.warmup(callback, url)
   schema.get_schemas_async(target_url, function(schemas, err)
     if err or #schemas == 0 then
       M.is_loading_flag = false
-      if callback then callback() end
+      if callback then
+        callback()
+      end
       return
     end
 
@@ -62,7 +64,9 @@ function M.warmup(callback, url)
 
     if total == 0 then
       M.is_loading_flag = false
-      if callback then callback() end
+      if callback then
+        callback()
+      end
       return
     end
 
@@ -74,7 +78,9 @@ function M.warmup(callback, url)
         -- Check if all schemas are loaded
         if pending >= total then
           M.is_loading_flag = false
-          if callback then callback() end
+          if callback then
+            callback()
+          end
         end
       end)
     end

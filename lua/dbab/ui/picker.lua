@@ -64,7 +64,7 @@ end
 ---@param db_type string
 ---@return string
 function M.get_icon(db_type)
-  local icons = require "dbab.ui.icons"
+  local icons = require("dbab.ui.icons")
   return icons.db(db_type)
 end
 

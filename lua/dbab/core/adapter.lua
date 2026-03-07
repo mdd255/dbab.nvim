@@ -15,7 +15,14 @@ function M.parse_url(url)
     if path then
       if path:match("^/") or path:match("^%w+:") or path:match("^~") then
         result.database = path
-      elseif path:match("^home/") or path:match("^Users/") or path:match("^tmp/") or path:match("^var/") or path:match("^etc/") or path:match("^usr/") then
+      elseif
+        path:match("^home/")
+        or path:match("^Users/")
+        or path:match("^tmp/")
+        or path:match("^var/")
+        or path:match("^etc/")
+        or path:match("^usr/")
+      then
         result.database = "/" .. path
       else
         result.database = path

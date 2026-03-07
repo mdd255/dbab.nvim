@@ -111,8 +111,12 @@ local function dadbod_get_cmd(url)
 
   if ok and cmd and url:match("^mariadb://") then
     local is_mariadb = false
-    if type(cmd) == "string" and cmd:match("^mariadb") then is_mariadb = true end
-    if type(cmd) == "table" and cmd[1] == "mariadb" then is_mariadb = true end
+    if type(cmd) == "string" and cmd:match("^mariadb") then
+      is_mariadb = true
+    end
+    if type(cmd) == "table" and cmd[1] == "mariadb" then
+      is_mariadb = true
+    end
 
     if is_mariadb and vim.fn.executable("mariadb") == 0 and vim.fn.executable("mysql") == 1 then
       local fallback_url = url:gsub("^mariadb://", "mysql://")

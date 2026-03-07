@@ -32,7 +32,7 @@ end
 ---@return string
 local function sanitize_filename(name)
   -- Remove or replace characters that are invalid in filenames
-  local sanitized = name:gsub("[/\\:*?\"<>|]", "_")
+  local sanitized = name:gsub('[/\\:*?"<>|]', "_")
   -- Ensure it doesn't start with a dot
   if sanitized:sub(1, 1) == "." then
     sanitized = "_" .. sanitized

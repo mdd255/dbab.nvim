@@ -515,9 +515,9 @@ function M.switch_tab(index)
   end
 
   -- Update buffer name
-  local conn_name = tab.conn_name or connection.get_active_name() or "no connection"
+  local conn_name = tab.conn_name or connection.get_active_name() or ""
   local display_name = tab.is_saved and tab.name or ("*" .. tab.name)
-  pcall(vim.api.nvim_buf_set_name, tab.buf, "[DB] " .. display_name .. " - " .. conn_name)
+  pcall(vim.api.nvim_buf_set_name, tab.buf, conn_name .. "." .. display_name)
 
   M.refresh_tabbar()
   get_sidebar().refresh()

@@ -105,7 +105,8 @@ function M.get_schemas(url)
     if not opts.sidebar.show_system_schemas then
       exclude_list = exclude_list .. ", 'information_schema', 'pg_catalog'"
     end
-    query = string.format([[
+    query = string.format(
+      [[
       SELECT schema_name,
              (SELECT COUNT(*) FROM information_schema.tables t WHERE t.table_schema = s.schema_name) as table_count
       FROM information_schema.schemata s
@@ -113,7 +114,9 @@ function M.get_schemas(url)
       ORDER BY
         CASE WHEN schema_name = 'public' THEN 0 ELSE 1 END,
         schema_name
-    ]], exclude_list)
+    ]],
+      exclude_list
+    )
   elseif db_type == "mysql" then
     query = [[
       SELECT schema_name,
@@ -204,12 +207,15 @@ function M.get_tables(url, schema_name)
   local query = ""
 
   if db_type == "postgres" then
-    query = string.format([[
+    query = string.format(
+      [[
       SELECT table_name, table_type
       FROM information_schema.tables
       WHERE table_schema = '%s'
       ORDER BY table_type, table_name
-    ]], schema_name)
+    ]],
+      schema_name
+    )
   elseif db_type == "mysql" then
     query = [[
       SELECT table_name, table_type
@@ -225,7 +231,8 @@ function M.get_tables(url, schema_name)
       ORDER BY type, name
     ]]
   elseif db_type == "mongodb" then
-    query = 'print("table_name\\ttable_type"); db.getCollectionNames().sort().forEach(function(c) { print(c + "\\tcollection"); });'
+    query =
+      'print("table_name\\ttable_type"); db.getCollectionNames().sort().forEach(function(c) { print(c + "\\tcollection"); });'
   else
     return {}
   end
@@ -323,7 +330,8 @@ function M.get_columns(url, table_name)
   local query = ""
 
   if db_type == "postgres" then
-    query = string.format([[
+    query = string.format(
+      [[
       SELECT
         c.column_name,
         c.data_type,
@@ -339,9 +347,13 @@ function M.get_columns(url, table_name)
       ) pk ON c.column_name = pk.column_name
       WHERE c.table_name = '%s' AND c.table_schema = 'public'
       ORDER BY c.ordinal_position
-    ]], table_name, table_name)
+    ]],
+      table_name,
+      table_name
+    )
   elseif db_type == "mysql" then
-    query = string.format([[
+    query = string.format(
+      [[
       SELECT
         column_name,
         data_type,
@@ -350,7 +362,9 @@ function M.get_columns(url, table_name)
       FROM information_schema.columns
       WHERE table_name = '%s' AND table_schema = DATABASE()
       ORDER BY ordinal_position
-    ]], table_name)
+    ]],
+      table_name
+    )
   elseif db_type == "sqlite" then
     query = string.format("PRAGMA table_info('%s')", table_name)
   elseif db_type == "mongodb" then
@@ -359,7 +373,7 @@ function M.get_columns(url, table_name)
         .. 'var sample = db.getCollection("%s").findOne();'
         .. "if (sample) {"
         .. "  Object.keys(sample).forEach(function(k) {"
-        .. '    var v = sample[k]; var t = typeof v;'
+        .. "    var v = sample[k]; var t = typeof v;"
         .. '    if (v === null) t = "null";'
         .. '    else if (Array.isArray(v)) t = "array";'
         .. '    else if (v instanceof ObjectId) t = "objectId";'
@@ -478,7 +492,8 @@ function M.get_schemas_async(url, callback)
     if not opts.sidebar.show_system_schemas then
       exclude_list = exclude_list .. ", 'information_schema', 'pg_catalog'"
     end
-    query = string.format([[
+    query = string.format(
+      [[
       SELECT schema_name,
              (SELECT COUNT(*) FROM information_schema.tables t WHERE t.table_schema = s.schema_name) as table_count
       FROM information_schema.schemata s
@@ -486,7 +501,9 @@ function M.get_schemas_async(url, callback)
       ORDER BY
         CASE WHEN schema_name = 'public' THEN 0 ELSE 1 END,
         schema_name
-    ]], exclude_list)
+    ]],
+      exclude_list
+    )
   elseif db_type == "mysql" then
     query = [[
       SELECT schema_name,
@@ -538,12 +555,15 @@ function M.get_tables_async(url, schema_name, callback)
   local query = ""
 
   if db_type == "postgres" then
-    query = string.format([[
+    query = string.format(
+      [[
       SELECT table_name, table_type
       FROM information_schema.tables
       WHERE table_schema = '%s'
       ORDER BY table_type, table_name
-    ]], schema_name)
+    ]],
+      schema_name
+    )
   elseif db_type == "mysql" then
     query = [[
       SELECT table_name, table_type
@@ -559,7 +579,8 @@ function M.get_tables_async(url, schema_name, callback)
       ORDER BY type, name
     ]]
   elseif db_type == "mongodb" then
-    query = 'print("table_name\\ttable_type"); db.getCollectionNames().sort().forEach(function(c) { print(c + "\\tcollection"); });'
+    query =
+      'print("table_name\\ttable_type"); db.getCollectionNames().sort().forEach(function(c) { print(c + "\\tcollection"); });'
   else
     vim.schedule(function()
       callback({}, nil)
@@ -595,7 +616,8 @@ function M.get_columns_async(url, table_name, callback)
   local query = ""
 
   if db_type == "postgres" then
-    query = string.format([[
+    query = string.format(
+      [[
       SELECT
         c.column_name,
         c.data_type,
@@ -611,9 +633,13 @@ function M.get_columns_async(url, table_name, callback)
       ) pk ON c.column_name = pk.column_name
       WHERE c.table_name = '%s' AND c.table_schema = 'public'
       ORDER BY c.ordinal_position
-    ]], table_name, table_name)
+    ]],
+      table_name,
+      table_name
+    )
   elseif db_type == "mysql" then
-    query = string.format([[
+    query = string.format(
+      [[
       SELECT
         column_name,
         data_type,
@@ -622,7 +648,9 @@ function M.get_columns_async(url, table_name, callback)
       FROM information_schema.columns
       WHERE table_name = '%s' AND table_schema = DATABASE()
       ORDER BY ordinal_position
-    ]], table_name)
+    ]],
+      table_name
+    )
   elseif db_type == "sqlite" then
     query = string.format("PRAGMA table_info('%s')", table_name)
   elseif db_type == "mongodb" then
@@ -631,7 +659,7 @@ function M.get_columns_async(url, table_name, callback)
         .. 'var sample = db.getCollection("%s").findOne();'
         .. "if (sample) {"
         .. "  Object.keys(sample).forEach(function(k) {"
-        .. '    var v = sample[k]; var t = typeof v;'
+        .. "    var v = sample[k]; var t = typeof v;"
         .. '    if (v === null) t = "null";'
         .. '    else if (Array.isArray(v)) t = "array";'
         .. '    else if (v instanceof ObjectId) t = "objectId";'
