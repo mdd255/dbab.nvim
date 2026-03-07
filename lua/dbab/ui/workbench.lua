@@ -517,7 +517,7 @@ function M.switch_tab(index)
   -- Update buffer name
   local conn_name = tab.conn_name or connection.get_active_name() or "no connection"
   local display_name = tab.is_saved and tab.name or ("*" .. tab.name)
-  pcall(vim.api.nvim_buf_set_name, tab.buf, "[dbab] " .. display_name .. " - " .. conn_name)
+  pcall(vim.api.nvim_buf_set_name, tab.buf, "[DB] " .. display_name .. " - " .. conn_name)
 
   M.refresh_tabbar()
   get_sidebar().refresh()
@@ -631,7 +631,7 @@ function M.create_new_tab(name, content, conn_name, is_saved)
   vim.api.nvim_buf_set_option(buf, "swapfile", false)
 
   local display_name = is_saved and tab_name or ("*" .. tab_name)
-  pcall(vim.api.nvim_buf_set_name, buf, "[dbab] " .. display_name .. " - " .. conn)
+  pcall(vim.api.nvim_buf_set_name, buf, "[DB] " .. display_name .. " - " .. conn)
 
   -- Set content
   local lines = content and vim.split(content, "\n") or { "" }
@@ -1402,7 +1402,7 @@ function M._init_all_components(windows)
     M.result_win = windows.result
     M.result_buf = vim.api.nvim_create_buf(false, true)
     vim.api.nvim_win_set_buf(M.result_win, M.result_buf)
-    vim.api.nvim_buf_set_name(M.result_buf, "[dbab] Result")
+    vim.api.nvim_buf_set_name(M.result_buf, "[DB] Result")
     vim.api.nvim_buf_set_option(M.result_buf, "filetype", "dbab_result")
     vim.api.nvim_buf_set_option(M.result_buf, "buftype", "nofile")
     vim.api.nvim_buf_set_option(M.result_buf, "buflisted", false)

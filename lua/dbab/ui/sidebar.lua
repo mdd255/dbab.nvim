@@ -122,7 +122,7 @@ local function render_tree()
       -- Buffers folder
       local buffers_key = conn.name .. ".buffers"
       local buffers_expanded = M.expanded[buffers_key]
-      local buffers_text = indent(1) .. icons.open_buffer .. " DB"
+      local buffers_text = indent(1) .. icons.open_buffer .. " buffers"
       local buffers_suffix = "(" .. #unsaved_buffers .. ")"
       table.insert(lines, pad_right(buffers_text, sidebar_width - #buffers_suffix - 1, buffers_suffix))
       table.insert(M.nodes, {
@@ -692,7 +692,7 @@ function M.setup(buf, win)
   vim.api.nvim_buf_set_option(buf, "buflisted", false)
   vim.api.nvim_buf_set_option(buf, "modifiable", false)
   vim.api.nvim_buf_set_option(buf, "swapfile", false)
-  vim.api.nvim_buf_set_name(buf, "[dbab] Explorer")
+  vim.api.nvim_buf_set_name(buf, "[DB] Explorer")
 
   vim.api.nvim_win_set_option(win, "number", false)
   vim.api.nvim_win_set_option(win, "relativenumber", false)
