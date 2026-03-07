@@ -1104,6 +1104,8 @@ function M.show_result(raw, elapsed)
     local raw_lines = vim.tbl_filter(function(line)
       -- Strip mongosh prompt remnants (e.g. "dbname> ", "test> ")
       if line:match("^%w+> ") or line:match("^%w+>$") then return false end
+      -- Strip mongosh pagination hint
+      if line:match('^Type "it" for more') then return false end
       return true
     end, vim.split(raw, "\n"))
     vim.api.nvim_buf_set_lines(M.result_buf, 0, -1, false, raw_lines)
