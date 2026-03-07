@@ -532,7 +532,6 @@ function M.toggle_node()
               M.is_loading = false
               M.loading_conn_name = nil
               M.expanded[node.name] = true
-            M.expanded[node.name .. ".buffers"] = true
             M.refresh()
             workbench.refresh_history()
             vim.notify("[dbab] Connected to: " .. node.name, vim.log.levels.INFO)
@@ -546,7 +545,6 @@ function M.toggle_node()
                 M.is_loading = false
                 M.loading_conn_name = nil
                 M.expanded[node.name] = true
-                M.expanded[node.name .. ".buffers"] = true
                 M.refresh()
                 workbench.refresh_history()
                 vim.notify("[dbab] Connected to: " .. node.name, vim.log.levels.INFO)
