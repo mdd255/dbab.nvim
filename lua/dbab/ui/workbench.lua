@@ -1307,6 +1307,9 @@ function M.open()
   end
 
   delete_existing_buf("[dbab]")
+  delete_existing_buf("[DB]")
+  delete_existing_buf("Explorer")
+  delete_existing_buf("Result")
 
   local cfg = config.get()
   local layout = cfg.layout or DEFAULT_LAYOUT
@@ -1402,7 +1405,7 @@ function M._init_all_components(windows)
     M.result_win = windows.result
     M.result_buf = vim.api.nvim_create_buf(false, true)
     vim.api.nvim_win_set_buf(M.result_win, M.result_buf)
-    vim.api.nvim_buf_set_name(M.result_buf, "Result")
+    pcall(vim.api.nvim_buf_set_name, M.result_buf, "Result")
     vim.api.nvim_buf_set_option(M.result_buf, "filetype", "dbab_result")
     vim.api.nvim_buf_set_option(M.result_buf, "buftype", "nofile")
     vim.api.nvim_buf_set_option(M.result_buf, "buflisted", false)
