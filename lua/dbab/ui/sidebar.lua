@@ -192,7 +192,7 @@ local function render_tree()
         local schema_db_type = connection.parse_type(conn_url)
         local db_schemas = schema.get_schemas(conn_url)
 
-        if schema_db_type == "mysql" or schema_db_type == "sqlite" then
+        if schema_db_type == "mysql" or schema_db_type == "sqlite" or schema_db_type == "mongodb" then
           local tables_key = conn.name .. ".tables"
           local tables_expanded = M.expanded[tables_key]
           local all_tables = {}
@@ -670,6 +670,11 @@ function M.insert_table_query()
   local node = M.nodes[node_idx]
 
   if node.type == "table" or node.type == "view" then
+    local active_url = connection.get_active_url()
+    local db_type = active_url and connection.parse_type(active_url) or "unknown"
+    if db_type == "mongodb" then
+      return string.format('db.getCollection("%s").find().limit(10);', node.name)
+    end
     local schema_prefix = node.schema and node.schema ~= "public" and (node.schema .. ".") or ""
     local query = string.format('SELECT * FROM %s"%s" LIMIT 10;', schema_prefix, node.name)
     return query

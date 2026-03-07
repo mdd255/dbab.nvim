@@ -207,7 +207,7 @@
 ---@alias SidebarNode Dbab.SidebarNode
 ---@alias SidebarNodeType Dbab.SidebarNodeType
 
----@alias Dbab.DatabaseType "postgres"|"mysql"|"sqlite"|"unknown"
+---@alias Dbab.DatabaseType "postgres"|"mysql"|"sqlite"|"mongodb"|"unknown"
 
 ---============================================================================
 --- Layout Types
