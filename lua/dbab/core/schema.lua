@@ -125,6 +125,8 @@ function M.get_schemas(url)
     -- SQLite doesn't have schemas, return a fake "main" schema
     url_cache.schemas = { { name = "main", table_count = 0 } }
     return url_cache.schemas
+  elseif db_type == "mongodb" then
+    query = 'print("schema_name\\ttable_count"); print("default\\t" + db.getCollectionNames().length);'
   else
     return {}
   end
@@ -222,6 +224,8 @@ function M.get_tables(url, schema_name)
       WHERE type IN ('table', 'view')
       ORDER BY type, name
     ]]
+  elseif db_type == "mongodb" then
+    query = 'print("table_name\\ttable_type"); db.getCollectionNames().sort().forEach(function(c) { print(c + "\\tcollection"); });'
   else
     return {}
   end
@@ -349,6 +353,22 @@ function M.get_columns(url, table_name)
     ]], table_name)
   elseif db_type == "sqlite" then
     query = string.format("PRAGMA table_info('%s')", table_name)
+  elseif db_type == "mongodb" then
+    query = string.format(
+      'print("column_name\\tdata_type\\tis_nullable\\tis_primary");'
+        .. 'var sample = db.getCollection("%s").findOne();'
+        .. "if (sample) {"
+        .. "  Object.keys(sample).forEach(function(k) {"
+        .. '    var v = sample[k]; var t = typeof v;'
+        .. '    if (v === null) t = "null";'
+        .. '    else if (Array.isArray(v)) t = "array";'
+        .. '    else if (v instanceof ObjectId) t = "objectId";'
+        .. '    else if (v instanceof Date) t = "date";'
+        .. '    print(k + "\\t" + t + "\\tYES\\t" + (k === "_id" ? "YES" : "NO"));'
+        .. "  });"
+        .. "}",
+      table_name
+    )
   else
     return {}
   end
@@ -480,6 +500,8 @@ function M.get_schemas_async(url, callback)
       callback(url_cache.schemas, nil)
     end)
     return
+  elseif db_type == "mongodb" then
+    query = 'print("schema_name\\ttable_count"); print("default\\t" + db.getCollectionNames().length);'
   else
     vim.schedule(function()
       callback({}, nil)
@@ -536,6 +558,8 @@ function M.get_tables_async(url, schema_name, callback)
       WHERE type IN ('table', 'view')
       ORDER BY type, name
     ]]
+  elseif db_type == "mongodb" then
+    query = 'print("table_name\\ttable_type"); db.getCollectionNames().sort().forEach(function(c) { print(c + "\\tcollection"); });'
   else
     vim.schedule(function()
       callback({}, nil)
@@ -601,6 +625,22 @@ function M.get_columns_async(url, table_name, callback)
     ]], table_name)
   elseif db_type == "sqlite" then
     query = string.format("PRAGMA table_info('%s')", table_name)
+  elseif db_type == "mongodb" then
+    query = string.format(
+      'print("column_name\\tdata_type\\tis_nullable\\tis_primary");'
+        .. 'var sample = db.getCollection("%s").findOne();'
+        .. "if (sample) {"
+        .. "  Object.keys(sample).forEach(function(k) {"
+        .. '    var v = sample[k]; var t = typeof v;'
+        .. '    if (v === null) t = "null";'
+        .. '    else if (Array.isArray(v)) t = "array";'
+        .. '    else if (v instanceof ObjectId) t = "objectId";'
+        .. '    else if (v instanceof Date) t = "date";'
+        .. '    print(k + "\\t" + t + "\\tYES\\t" + (k === "_id" ? "YES" : "NO"));'
+        .. "  });"
+        .. "}",
+      table_name
+    )
   else
     vim.schedule(function()
       callback({}, nil)

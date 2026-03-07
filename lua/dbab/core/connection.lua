@@ -20,6 +20,8 @@ function M.parse_type(url)
     return "mysql"
   elseif url:match("^sqlite") then
     return "sqlite"
+  elseif url:match("^mongodb") then
+    return "mongodb"
   else
     return "unknown"
   end

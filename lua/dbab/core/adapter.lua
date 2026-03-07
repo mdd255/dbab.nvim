@@ -82,6 +82,8 @@ function M.build_cmd(url)
     return M._build_mysql(url)
   elseif db_type == "sqlite" then
     return M._build_sqlite(url)
+  elseif db_type == "mongodb" then
+    return M._build_mongodb(url)
   end
 
   error("Unsupported database type: " .. db_type)
@@ -139,6 +141,12 @@ end
 function M._build_sqlite(url)
   local parsed = M.parse_url(url)
   return "sqlite3", { parsed.database }
+end
+
+---@param url string
+---@return string command, string[] args
+function M._build_mongodb(url)
+  return "mongosh", { url, "--quiet", "--norc" }
 end
 
 return M
