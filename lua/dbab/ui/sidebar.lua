@@ -770,7 +770,7 @@ function M.setup(buf, win)
 	vim.api.nvim_buf_set_option(buf, "buflisted", false)
 	vim.api.nvim_buf_set_option(buf, "modifiable", false)
 	vim.api.nvim_buf_set_option(buf, "swapfile", false)
-	vim.api.nvim_buf_set_name(buf, "Explorer")
+	pcall(vim.api.nvim_buf_set_name, buf, "Explorer")
 
 	vim.api.nvim_win_set_option(win, "number", false)
 	vim.api.nvim_win_set_option(win, "relativenumber", false)
