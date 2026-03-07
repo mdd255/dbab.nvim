@@ -422,7 +422,9 @@ local function render_tabbar()
 
   local parts = {}
   for i, tab in ipairs(M.query_tabs) do
-    local icon = tab.is_saved and (icons.query_file .. " ") or (icons.open_buffer .. " ")
+    local resolved_url = connection.get_resolved_url_by_name(tab.conn_name)
+    local db_type = resolved_url and connection.parse_type(resolved_url) or "unknown"
+    local icon = icons.db(db_type) .. " "
     local is_active = i == M.active_tab
 
     -- Truncate name if needed
