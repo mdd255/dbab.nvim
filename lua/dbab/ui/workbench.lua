@@ -1128,7 +1128,11 @@ function M.show_result(raw, elapsed)
   end
 
   if result_style == "raw" then
-    local raw_lines = vim.split(result.raw, "\n")
+    local raw_lines = vim.tbl_filter(function(line)
+      -- Strip PostgreSQL/MySQL row count footer (e.g. "(5 rows)")
+      if line:match("^%(%d+ rows?%)") then return false end
+      return true
+    end, vim.split(result.raw, "\n"))
     vim.api.nvim_buf_set_lines(M.result_buf, 0, -1, false, raw_lines)
     vim.api.nvim_buf_set_option(M.result_buf, "modifiable", false)
     M.refresh_result_winbar()
