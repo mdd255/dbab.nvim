@@ -369,18 +369,21 @@ function M.get_columns(url, table_name)
     query = string.format("PRAGMA table_info('%s')", table_name)
   elseif db_type == "mongodb" then
     query = string.format(
-      'print("column_name\\tdata_type\\tis_nullable\\tis_primary");'
-        .. 'var sample = db.getCollection("%s").findOne();'
-        .. "if (sample) {"
-        .. "  Object.keys(sample).forEach(function(k) {"
-        .. "    var v = sample[k]; var t = typeof v;"
-        .. '    if (v === null) t = "null";'
-        .. '    else if (Array.isArray(v)) t = "array";'
-        .. '    else if (v instanceof ObjectId) t = "objectId";'
-        .. '    else if (v instanceof Date) t = "date";'
-        .. '    print(k + "\\t" + t + "\\tYES\\t" + (k === "_id" ? "YES" : "NO"));'
-        .. "  });"
-        .. "}",
+      [[
+print("column_name\tdata_type\tis_nullable\tis_primary");
+var sample = db.getCollection("%s").findOne();
+if (sample) {
+  Object.keys(sample).forEach(function(k) {
+    var v = sample[k];
+    var t = typeof v;
+    if (v === null) { t = "null"; }
+    else if (Array.isArray(v)) { t = "array"; }
+    else if (v instanceof ObjectId) { t = "objectId"; }
+    else if (v instanceof Date) { t = "date"; }
+    print(k + "\t" + t + "\tYES\t" + (k === "_id" ? "YES" : "NO"));
+  });
+}
+]],
       table_name
     )
   else
@@ -655,18 +658,21 @@ function M.get_columns_async(url, table_name, callback)
     query = string.format("PRAGMA table_info('%s')", table_name)
   elseif db_type == "mongodb" then
     query = string.format(
-      'print("column_name\\tdata_type\\tis_nullable\\tis_primary");'
-        .. 'var sample = db.getCollection("%s").findOne();'
-        .. "if (sample) {"
-        .. "  Object.keys(sample).forEach(function(k) {"
-        .. "    var v = sample[k]; var t = typeof v;"
-        .. '    if (v === null) t = "null";'
-        .. '    else if (Array.isArray(v)) t = "array";'
-        .. '    else if (v instanceof ObjectId) t = "objectId";'
-        .. '    else if (v instanceof Date) t = "date";'
-        .. '    print(k + "\\t" + t + "\\tYES\\t" + (k === "_id" ? "YES" : "NO"));'
-        .. "  });"
-        .. "}",
+      [[
+print("column_name\tdata_type\tis_nullable\tis_primary");
+var sample = db.getCollection("%s").findOne();
+if (sample) {
+  Object.keys(sample).forEach(function(k) {
+    var v = sample[k];
+    var t = typeof v;
+    if (v === null) { t = "null"; }
+    else if (Array.isArray(v)) { t = "array"; }
+    else if (v instanceof ObjectId) { t = "objectId"; }
+    else if (v instanceof Date) { t = "date"; }
+    print(k + "\t" + t + "\tYES\t" + (k === "_id" ? "YES" : "NO"));
+  });
+}
+]],
       table_name
     )
   else
