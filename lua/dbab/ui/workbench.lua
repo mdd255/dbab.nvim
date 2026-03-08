@@ -725,6 +725,15 @@ local function detect_cell_hl(cell)
     return "DbabUuid"
   elseif cell:match("^[%[{]") then
     return "DbabJson"
+  -- MongoDB extended types
+  elseif cell:match("^ObjectId%(") then
+    return "DbabUuid"
+  elseif cell:match("^ISODate%(") or cell:match("^Timestamp%(") then
+    return "DbabDateTime"
+  elseif cell:match("^NumberLong%(") or cell:match("^NumberInt%(") or cell:match("^NumberDecimal%(") then
+    return "DbabNumber"
+  elseif cell:match("^BinData%(") or cell:match("^UUID%(") then
+    return "DbabUuid"
   else
     return "DbabString"
   end
