@@ -370,18 +370,24 @@ function M.get_columns(url, table_name)
   elseif db_type == "mongodb" then
     query = string.format(
       [[
-print("column_name\tdata_type\tis_nullable\tis_primary");
-var sample = db.getCollection("%s").findOne();
-if (sample) {
-  Object.keys(sample).forEach(function(k) {
-    var v = sample[k];
-    var t = typeof v;
-    if (v === null) { t = "null"; }
-    else if (Array.isArray(v)) { t = "array"; }
-    else if (v instanceof ObjectId) { t = "objectId"; }
-    else if (v instanceof Date) { t = "date"; }
-    print(k + "\t" + t + "\tYES\t" + (k === "_id" ? "YES" : "NO"));
-  });
+try {
+  print("column_name\tdata_type\tis_nullable\tis_primary");
+  var doc = db.getCollection("%s").findOne();
+  if (doc) {
+    Object.keys(doc).forEach(function(k) {
+      var v = doc[k];
+      var t = typeof v;
+      if (v === null || v === undefined) { t = "null"; }
+      else if (Array.isArray(v)) { t = "array"; }
+      else if (t === "object") {
+        try { t = v.constructor.name.toLowerCase(); } catch(e) { t = "object"; }
+      }
+      print(k + "\t" + t + "\tYES\t" + (k === "_id" ? "YES" : "NO"));
+    });
+  }
+} catch(err) {
+  print("column_name\tdata_type\tis_nullable\tis_primary");
+  print("_error\t" + err.message + "\tNO\tNO");
 }
 ]],
       table_name
@@ -659,18 +665,24 @@ function M.get_columns_async(url, table_name, callback)
   elseif db_type == "mongodb" then
     query = string.format(
       [[
-print("column_name\tdata_type\tis_nullable\tis_primary");
-var sample = db.getCollection("%s").findOne();
-if (sample) {
-  Object.keys(sample).forEach(function(k) {
-    var v = sample[k];
-    var t = typeof v;
-    if (v === null) { t = "null"; }
-    else if (Array.isArray(v)) { t = "array"; }
-    else if (v instanceof ObjectId) { t = "objectId"; }
-    else if (v instanceof Date) { t = "date"; }
-    print(k + "\t" + t + "\tYES\t" + (k === "_id" ? "YES" : "NO"));
-  });
+try {
+  print("column_name\tdata_type\tis_nullable\tis_primary");
+  var doc = db.getCollection("%s").findOne();
+  if (doc) {
+    Object.keys(doc).forEach(function(k) {
+      var v = doc[k];
+      var t = typeof v;
+      if (v === null || v === undefined) { t = "null"; }
+      else if (Array.isArray(v)) { t = "array"; }
+      else if (t === "object") {
+        try { t = v.constructor.name.toLowerCase(); } catch(e) { t = "object"; }
+      }
+      print(k + "\t" + t + "\tYES\t" + (k === "_id" ? "YES" : "NO"));
+    });
+  }
+} catch(err) {
+  print("column_name\tdata_type\tis_nullable\tis_primary");
+  print("_error\t" + err.message + "\tNO\tNO");
 }
 ]],
       table_name
