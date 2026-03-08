@@ -570,22 +570,24 @@ end
 
 function M._do_close_tab()
   local tab = M.query_tabs[M.active_tab]
+  local old_buf = tab.buf
 
-  -- Delete buffer
-  if tab.buf and vim.api.nvim_buf_is_valid(tab.buf) then
-    pcall(vim.api.nvim_buf_delete, tab.buf, { force = true })
-  end
-
-  -- Remove from list
+  -- Remove from list first
   table.remove(M.query_tabs, M.active_tab)
 
   if #M.query_tabs == 0 then
-    -- No more tabs, create a new one
+    -- No more tabs, create a new one (this sets the editor window buffer)
     M.create_new_tab()
   else
-    -- Switch to previous or first tab
+    -- Switch to the nearest remaining tab BEFORE deleting the old buffer,
+    -- so the editor window always has a valid buffer displayed
     M.active_tab = math.min(M.active_tab, #M.query_tabs)
     M.switch_tab(M.active_tab)
+  end
+
+  -- Now safe to delete the old buffer since the window shows the new tab
+  if old_buf and vim.api.nvim_buf_is_valid(old_buf) then
+    pcall(vim.api.nvim_buf_delete, old_buf, { force = true })
   end
 end
 
