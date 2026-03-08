@@ -1030,6 +1030,115 @@ function M.open_saved_query(query_name, content, conn_name)
   end
 end
 
+--- Parse mongosh JSON output into vertical RECORD format.
+--- Uses indentation-based heuristics since mongosh output is consistently formatted.
+---@param raw_lines string[]
+---@return string[]|nil lines, number record_count
+local function parse_mongodb_vertical(raw_lines)
+  -- Determine the indentation level of top-level document fields
+  local field_indent = nil
+  for _, line in ipairs(raw_lines) do
+    local indent_str, key = line:match("^(%s+)([%w_$]+):")
+    if indent_str and key then
+      field_indent = #indent_str
+      break
+    end
+  end
+
+  if not field_indent then
+    return nil, 0
+  end
+
+  local vert_lines = {}
+  local record_num = 0
+  local fields = {}
+  local max_key_len = 0
+  local accumulating = false
+  local acc_key = nil
+  local acc_parts = {}
+
+  local function flush_record()
+    if accumulating and acc_key then
+      table.insert(fields, { key = acc_key, value = table.concat(acc_parts, " ") })
+      max_key_len = math.max(max_key_len, #acc_key)
+      accumulating = false
+      acc_key = nil
+      acc_parts = {}
+    end
+    if #fields > 0 then
+      record_num = record_num + 1
+      table.insert(vert_lines, string.format("-[ RECORD %d ]%s", record_num, string.rep("-", 16)))
+      for _, f in ipairs(fields) do
+        local padded = f.key .. string.rep(" ", max_key_len - #f.key)
+        table.insert(vert_lines, padded .. " | " .. f.value)
+      end
+      fields = {}
+      max_key_len = 0
+    end
+  end
+
+  for _, line in ipairs(raw_lines) do
+    local trimmed = vim.trim(line)
+    if trimmed == "" then
+      goto continue
+    end
+
+    local indent_len = #(line:match("^(%s*)") or "")
+
+    -- Skip array brackets
+    if trimmed == "[" or trimmed == "]" then
+      goto continue
+    end
+
+    -- Document boundary: { or } at indent less than field level
+    if trimmed:match("^}") and indent_len < field_indent then
+      flush_record()
+      goto continue
+    end
+    if trimmed:match("^{") and indent_len < field_indent then
+      goto continue
+    end
+
+    -- Field at the expected indent level
+    if indent_len == field_indent then
+      -- Close any accumulated nested value first
+      if accumulating and acc_key then
+        table.insert(fields, { key = acc_key, value = table.concat(acc_parts, " ") })
+        max_key_len = math.max(max_key_len, #acc_key)
+        accumulating = false
+        acc_key = nil
+        acc_parts = {}
+      end
+
+      local key, val = trimmed:match("^([%w_$]+):%s*(.-)%s*$")
+      if key then
+        val = val:gsub(",$", "")
+        -- Check if value opens a nested structure that doesn't close on this line
+        local opens_nested = (val:match("^{") or val:match("^%["))
+          and not (val:match("}$") or val:match("%]$"))
+        if opens_nested then
+          accumulating = true
+          acc_key = key
+          acc_parts = { val }
+        else
+          table.insert(fields, { key = key, value = val })
+          max_key_len = math.max(max_key_len, #key)
+        end
+      end
+    elseif indent_len > field_indent and accumulating then
+      -- Part of a nested value
+      table.insert(acc_parts, trimmed:gsub(",$", ""))
+    end
+
+    ::continue::
+  end
+
+  -- Flush any remaining document
+  flush_record()
+
+  return vert_lines, record_num
+end
+
 ---@param raw string
 ---@param elapsed number
 function M.show_result(raw, elapsed)
@@ -1100,16 +1209,51 @@ function M.show_result(raw, elapsed)
   pcall(vim.treesitter.stop, M.result_buf)
   vim.api.nvim_buf_set_option(M.result_buf, "filetype", "")
 
-  -- MongoDB: render raw output with jsonc syntax highlighting
+  -- MongoDB: handle result rendering per style
   local active_url = connection.get_active_url()
   if active_url and connection.parse_type(active_url) == "mongodb" then
     local raw_lines = vim.tbl_filter(function(line)
-      -- Strip mongosh prompt remnants (e.g. "dbname> ", "test> ")
       if line:match("^%w+> ") or line:match("^%w+>$") then return false end
-      -- Strip mongosh pagination hint
       if line:match('^Type "it" for more') then return false end
       return true
     end, vim.split(raw, "\n"))
+
+    if result_style == "vertical" then
+      local vert_lines, record_count = parse_mongodb_vertical(raw_lines)
+      if vert_lines and #vert_lines > 0 then
+        vim.api.nvim_buf_set_lines(M.result_buf, 0, -1, false, vert_lines)
+        vim.api.nvim_buf_set_option(M.result_buf, "modifiable", false)
+
+        local ns = vim.api.nvim_create_namespace("dbab_result")
+        vim.api.nvim_buf_clear_namespace(M.result_buf, ns, 0, -1)
+        for i, line in ipairs(vert_lines) do
+          local ln = i - 1
+          if line:match("^%-%[ RECORD %d+") then
+            vim.api.nvim_buf_add_highlight(M.result_buf, ns, "DbabHeader", ln, 0, -1)
+          else
+            local sep = line:find(" | ")
+            if sep then
+              local col_name = vim.trim(line:sub(1, sep - 1))
+              local col_start = line:find(col_name, 1, true)
+              vim.api.nvim_buf_add_highlight(M.result_buf, ns, "DbabKey", ln, col_start - 1, col_start - 1 + #col_name)
+              vim.api.nvim_buf_add_highlight(M.result_buf, ns, "DbabBorder", ln, sep - 1, sep + 2)
+              local value = vim.trim(line:sub(sep + 3))
+              local value_start = sep + 2
+              local hl_group = detect_cell_hl(value)
+              vim.api.nvim_buf_add_highlight(M.result_buf, ns, hl_group, ln, value_start, value_start + #value)
+            end
+          end
+        end
+
+        M.last_result = { columns = {}, rows = {}, row_count = record_count, raw = table.concat(vert_lines, "\n") }
+        M.refresh_result_winbar()
+        local status = string.format(" Result: %d documents (%.1fms) ", record_count, elapsed)
+        vim.notify(status, vim.log.levels.INFO)
+        return
+      end
+      -- Fall through to jsonc if vertical parse failed
+    end
+
     vim.api.nvim_buf_set_lines(M.result_buf, 0, -1, false, raw_lines)
     vim.api.nvim_buf_set_option(M.result_buf, "modifiable", false)
     local ok = pcall(vim.treesitter.start, M.result_buf, "jsonc")
