@@ -1127,7 +1127,7 @@ local function parse_mongodb_vertical(raw_lines)
       end
     elseif indent_len > field_indent and accumulating then
       -- Part of a nested value
-      table.insert(acc_parts, trimmed:gsub(",$", ""))
+      table.insert(acc_parts, (trimmed:gsub(",$", "")))
     end
 
     ::continue::
