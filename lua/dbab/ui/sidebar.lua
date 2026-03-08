@@ -888,7 +888,7 @@ function M.setup_keymaps()
 	end)
 
 	vim.keymap.set("n", config.get().keymaps.close, function()
-		M.close()
+		workbench.close()
 	end, opts)
 
 	map(keymaps.copy_query, function()
