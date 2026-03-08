@@ -30,6 +30,9 @@ local function cli_execute(url, query)
     table.insert(cmd_list, "--eval")
     table.insert(cmd_list, query)
     local lines = vim.fn.systemlist(cmd_list)
+    if vim.v.shell_error ~= 0 then
+      vim.notify("[dbab] mongosh error (exit " .. vim.v.shell_error .. "): " .. table.concat(lines, " "), vim.log.levels.WARN)
+    end
     return table.concat(lines, "\n")
   end
 
