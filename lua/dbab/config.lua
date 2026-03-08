@@ -46,6 +46,7 @@ M.defaults = {
     style = "table",
   },
   history = {
+    show = true,
     width = 0.2,
     style = "compact",
     max_entries = 100,

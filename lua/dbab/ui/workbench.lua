@@ -1469,6 +1469,23 @@ function M.open()
   local cfg = config.get()
   local layout = cfg.layout or DEFAULT_LAYOUT
 
+  -- Strip history component from layout when history.show is false
+  if cfg.history and cfg.history.show == false then
+    local filtered = {}
+    for _, row in ipairs(layout) do
+      local new_row = {}
+      for _, comp in ipairs(row) do
+        if comp ~= "history" then
+          table.insert(new_row, comp)
+        end
+      end
+      if #new_row > 0 then
+        table.insert(filtered, new_row)
+      end
+    end
+    layout = filtered
+  end
+
   -- Validate layout
   local valid, err = validate_layout(layout)
   if not valid then
