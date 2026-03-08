@@ -36,9 +36,11 @@ M.defaults = {
     show_system_schemas = true,
   },
   editor = {
+    height = 0.5,
     show_tabbar = true,
   },
   result = {
+    height = 0.5,
     max_width = 120,
     max_height = 20,
     show_line_number = true,

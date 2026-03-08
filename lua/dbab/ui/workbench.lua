@@ -1500,7 +1500,21 @@ function M.open()
   local total_width = vim.o.columns
   local total_height = vim.o.lines - 4
   local row_count = #layout
-  local row_height = math.floor(total_height / row_count)
+
+  -- Map each row to a height ratio based on its components
+  local height_map = {
+    editor = cfg.editor and cfg.editor.height or 0.5,
+    result = cfg.result and cfg.result.height or 0.5,
+  }
+
+  local function get_row_height(row)
+    for _, comp in ipairs(row) do
+      if height_map[comp] then
+        return math.floor(total_height * height_map[comp])
+      end
+    end
+    return math.floor(total_height / row_count)
+  end
 
   local windows = {}
 
@@ -1528,7 +1542,7 @@ function M.open()
     local row = layout[row_idx]
     local first_comp = row[1]
     if windows[first_comp] and vim.api.nvim_win_is_valid(windows[first_comp]) then
-      vim.api.nvim_win_set_height(windows[first_comp], row_height)
+      vim.api.nvim_win_set_height(windows[first_comp], get_row_height(row))
     end
   end
 
