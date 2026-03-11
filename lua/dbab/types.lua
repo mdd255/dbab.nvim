@@ -17,6 +17,7 @@
 ---@field result Dbab.ResultConfig
 ---@field history Dbab.HistoryConfig
 ---@field keymaps Dbab.Keymaps
+---@field redis? Dbab.RedisConfig
 ---@field highlights? table<string, table> Highlight group overrides (nvim_set_hl opts)
 
 ---@class Dbab.Connection
@@ -206,7 +207,10 @@
 ---@alias SidebarNode Dbab.SidebarNode
 ---@alias SidebarNodeType Dbab.SidebarNodeType
 
----@alias Dbab.DatabaseType "postgres"|"mysql"|"sqlite"|"mongodb"|"unknown"
+---@class Dbab.RedisConfig
+---@field command? string Redis CLI command (default "redis-cli", e.g. "rdcli")
+
+---@alias Dbab.DatabaseType "postgres"|"mysql"|"sqlite"|"mongodb"|"redis"|"unknown"
 
 ---============================================================================
 --- Layout Types

@@ -106,6 +106,9 @@ M.defaults = {
       to_editor = "<S-Tab>",
     },
   },
+  redis = {
+    command = "redis-cli",
+  },
   highlights = {},
 }
 

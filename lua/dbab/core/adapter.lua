@@ -162,6 +162,8 @@ end
 ---@return string command, string[] args
 function M._build_redis(url)
   local parsed = M.parse_url(url)
+  local config = require("dbab.config")
+  local redis_cmd = config.get().redis and config.get().redis.command or "redis-cli"
   local args = {}
 
   if parsed.host then
@@ -182,7 +184,7 @@ function M._build_redis(url)
     table.insert(args, parsed.database)
   end
 
-  return "redis-cli", args
+  return redis_cmd, args
 end
 
 return M
