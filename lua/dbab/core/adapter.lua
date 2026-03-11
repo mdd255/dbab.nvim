@@ -91,6 +91,8 @@ function M.build_cmd(url)
     return M._build_sqlite(url)
   elseif db_type == "mongodb" then
     return M._build_mongodb(url)
+  elseif db_type == "redis" then
+    return M._build_redis(url)
   end
 
   error("Unsupported database type: " .. db_type)
@@ -154,6 +156,33 @@ end
 ---@return string command, string[] args
 function M._build_mongodb(url)
   return "mongosh", { url, "--quiet", "--norc" }
+end
+
+---@param url string
+---@return string command, string[] args
+function M._build_redis(url)
+  local parsed = M.parse_url(url)
+  local args = {}
+
+  if parsed.host then
+    table.insert(args, "-h")
+    table.insert(args, parsed.host)
+  end
+  if parsed.port then
+    table.insert(args, "-p")
+    table.insert(args, parsed.port)
+  end
+  if parsed.password then
+    table.insert(args, "-a")
+    table.insert(args, parsed.password)
+    table.insert(args, "--no-auth-warning")
+  end
+  if parsed.database and parsed.database ~= "" then
+    table.insert(args, "-n")
+    table.insert(args, parsed.database)
+  end
+
+  return "redis-cli", args
 end
 
 return M

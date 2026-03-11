@@ -61,4 +61,37 @@ describe("schema cache", function()
       error(err)
     end
   end)
+
+  describe("parse_redis_keys", function()
+    it("parses numbered format", function()
+      local raw = '1) "user:1"\n2) "user:2"\n3) "session:abc"'
+      local tables = schema.parse_redis_keys(raw)
+      assert.are.equal(3, #tables)
+      assert.are.equal("session:abc", tables[1].name)
+      assert.are.equal("user:1", tables[2].name)
+      assert.are.equal("user:2", tables[3].name)
+      assert.are.equal("key", tables[1].type)
+    end)
+
+    it("parses raw format (one key per line)", function()
+      local raw = "foo\nbar\nbaz"
+      local tables = schema.parse_redis_keys(raw)
+      assert.are.equal(3, #tables)
+      assert.are.equal("bar", tables[1].name)
+      assert.are.equal("baz", tables[2].name)
+      assert.are.equal("foo", tables[3].name)
+    end)
+
+    it("handles empty array", function()
+      local raw = "(empty array)"
+      local tables = schema.parse_redis_keys(raw)
+      assert.are.equal(0, #tables)
+    end)
+
+    it("handles empty string", function()
+      local raw = ""
+      local tables = schema.parse_redis_keys(raw)
+      assert.are.equal(0, #tables)
+    end)
+  end)
 end)

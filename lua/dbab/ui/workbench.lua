@@ -627,7 +627,8 @@ function M.create_new_tab(name, content, conn_name, is_saved)
 
   -- Setup buffer
   local resolved_url = connection.get_active_url()
-  local ft = (resolved_url and connection.parse_type(resolved_url) == "mongodb") and "javascript" or "sql"
+  local db_type = resolved_url and connection.parse_type(resolved_url) or "unknown"
+  local ft = db_type == "mongodb" and "javascript" or db_type == "redis" and "redis" or "sql"
   vim.api.nvim_buf_set_option(buf, "filetype", ft)
   vim.api.nvim_buf_set_option(buf, "buftype", "acwrite") -- allows :w via BufWriteCmd
   vim.api.nvim_buf_set_option(buf, "swapfile", false)

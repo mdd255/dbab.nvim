@@ -130,6 +130,9 @@ function M.get_schemas(url)
     return url_cache.schemas
   elseif db_type == "mongodb" then
     query = 'print("schema_name\\ttable_count"); print("default\\t" + db.getCollectionNames().length);'
+  elseif db_type == "redis" then
+    url_cache.schemas = { { name = "default", table_count = 0 } }
+    return url_cache.schemas
   else
     return {}
   end
@@ -233,6 +236,10 @@ function M.get_tables(url, schema_name)
   elseif db_type == "mongodb" then
     query =
       'print("table_name\\ttable_type"); db.getCollectionNames().sort().forEach(function(c) { print(c + "\\tcollection"); });'
+  elseif db_type == "redis" then
+    local result = executor.execute(url, "KEYS *")
+    url_cache.tables[schema_name] = M.parse_redis_keys(result)
+    return url_cache.tables[schema_name]
   else
     return {}
   end
@@ -392,6 +399,9 @@ try {
 ]],
       table_name
     )
+  elseif db_type == "redis" then
+    url_cache.columns[table_name] = {}
+    return url_cache.columns[table_name]
   else
     return {}
   end
@@ -528,6 +538,12 @@ function M.get_schemas_async(url, callback)
     return
   elseif db_type == "mongodb" then
     query = 'print("schema_name\\ttable_count"); print("default\\t" + db.getCollectionNames().length);'
+  elseif db_type == "redis" then
+    url_cache.schemas = { { name = "default", table_count = 0 } }
+    vim.schedule(function()
+      callback(url_cache.schemas, nil)
+    end)
+    return
   else
     vim.schedule(function()
       callback({}, nil)
@@ -590,6 +606,16 @@ function M.get_tables_async(url, schema_name, callback)
   elseif db_type == "mongodb" then
     query =
       'print("table_name\\ttable_type"); db.getCollectionNames().sort().forEach(function(c) { print(c + "\\tcollection"); });'
+  elseif db_type == "redis" then
+    executor.execute_async(url, "KEYS *", function(result, err)
+      if err then
+        callback({}, err)
+        return
+      end
+      url_cache.tables[schema_name] = M.parse_redis_keys(result)
+      callback(url_cache.tables[schema_name], nil)
+    end)
+    return
   else
     vim.schedule(function()
       callback({}, nil)
@@ -687,6 +713,12 @@ try {
 ]],
       table_name
     )
+  elseif db_type == "redis" then
+    url_cache.columns[table_name] = {}
+    vim.schedule(function()
+      callback(url_cache.columns[table_name], nil)
+    end)
+    return
   else
     vim.schedule(function()
       callback({}, nil)
@@ -702,6 +734,33 @@ try {
     url_cache.columns[table_name] = M.parse_columns(result, db_type)
     callback(url_cache.columns[table_name], nil)
   end)
+end
+
+---@param raw string
+---@return Dbab.Table[]
+function M.parse_redis_keys(raw)
+  local tables = {}
+  local lines = vim.split(raw, "\n")
+  for _, line in ipairs(lines) do
+    line = vim.trim(line)
+    if line == "" or line == "(empty array)" or line == "(empty list or set)" then
+      goto continue
+    end
+    -- Handle numbered format: 1) "keyname" or 1) keyname
+    local key = line:match('^%d+%)%s+"(.+)"$') or line:match("^%d+%)%s+(.+)$")
+    if not key then
+      -- Raw format: just the key name (or quoted)
+      key = line:match('^"(.+)"$') or line
+    end
+    if key and key ~= "" then
+      table.insert(tables, { name = key, type = "key" })
+    end
+    ::continue::
+  end
+  table.sort(tables, function(a, b)
+    return a.name < b.name
+  end)
+  return tables
 end
 
 return M

@@ -38,8 +38,16 @@ describe("connection", function()
       assert.are.equal("sqlite", connection.parse_type("sqlite:///path/to/db"))
     end)
 
+    it("detects mongodb", function()
+      assert.are.equal("mongodb", connection.parse_type("mongodb://localhost/db"))
+    end)
+
+    it("detects redis", function()
+      assert.are.equal("redis", connection.parse_type("redis://localhost/0"))
+    end)
+
     it("returns unknown for unrecognized URL", function()
-      assert.are.equal("unknown", connection.parse_type("mongodb://localhost/db"))
+      assert.are.equal("unknown", connection.parse_type("cassandra://localhost/db"))
     end)
   end)
 

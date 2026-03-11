@@ -22,6 +22,8 @@ function M.parse_type(url)
     return "sqlite"
   elseif url:match("^mongodb") then
     return "mongodb"
+  elseif url:match("^redis") then
+    return "redis"
   else
     return "unknown"
   end
