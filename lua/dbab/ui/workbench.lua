@@ -1045,6 +1045,17 @@ end
 --- Uses indentation-based heuristics since mongosh output is consistently formatted.
 ---@param raw_lines string[]
 ---@return string[]|nil lines, number record_count
+local function collapse_to_single_line(parts)
+  local pieces = {}
+  for _, p in ipairs(parts) do
+    local content = vim.trim(p)
+    if content ~= "" then
+      table.insert(pieces, content)
+    end
+  end
+  return table.concat(pieces, " ")
+end
+
 local function collapse_array_objects(parts)
   if #parts < 2 or not parts[1]:match("^%[") then
     return parts
@@ -1116,11 +1127,19 @@ local function parse_mongodb_vertical(raw_lines)
       for _, f in ipairs(fields) do
         local padded = f.key .. string.rep(" ", max_key_len - #f.key)
         if type(f.value) == "table" then
-          for j, part in ipairs(f.value) do
-            if j == 1 then
-              table.insert(vert_lines, padded .. " | " .. part)
-            else
-              table.insert(vert_lines, string.rep(" ", max_key_len) .. " | " .. part)
+          local win_width = M.result_win and vim.api.nvim_win_is_valid(M.result_win)
+            and vim.api.nvim_win_get_width(M.result_win) or 120
+          local prefix_len = max_key_len + 3 -- " | "
+          local single = collapse_to_single_line(f.value)
+          if prefix_len + #single <= win_width then
+            table.insert(vert_lines, padded .. " | " .. single)
+          else
+            for j, part in ipairs(f.value) do
+              if j == 1 then
+                table.insert(vert_lines, padded .. " | " .. part)
+              else
+                table.insert(vert_lines, string.rep(" ", max_key_len) .. " | " .. part)
+              end
             end
           end
         else
