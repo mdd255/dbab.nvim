@@ -43,9 +43,12 @@ local function cli_execute(url, query)
       table.insert(cmd_list, token)
     end
     local lines = vim.fn.systemlist(cmd_list)
-    -- Strip ANSI color codes (rdcli outputs colored text)
     for i, line in ipairs(lines) do
-      lines[i] = line:gsub("\27%[[%d;]*m", "")
+      -- Strip ANSI color codes (rdcli outputs colored text)
+      line = line:gsub("\27%[[%d;]*m", "")
+      -- Strip Redis array index prefix: "1) " -> ""
+      line = line:gsub("^%d+%)%s+", "")
+      lines[i] = line
     end
     return table.concat(lines, "\n")
   end
@@ -95,9 +98,11 @@ local function cli_execute_async(url, query, callback)
     args = args,
     on_stdout = function(_, data)
       if data then
-        -- Strip ANSI color codes for Redis (rdcli outputs colored text)
         if is_redis then
+          -- Strip ANSI color codes (rdcli outputs colored text)
           data = data:gsub("\27%[[%d;]*m", "")
+          -- Strip Redis array index prefix: "1) " -> ""
+          data = data:gsub("^%d+%)%s+", "")
         end
         table.insert(stdout_results, data)
       end

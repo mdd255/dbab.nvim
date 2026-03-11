@@ -1296,9 +1296,23 @@ function M.show_result(raw, elapsed)
   pcall(vim.treesitter.stop, M.result_buf)
   vim.api.nvim_buf_set_option(M.result_buf, "filetype", "")
 
-  -- MongoDB: handle result rendering per style
   local active_url = connection.get_active_url()
-  if active_url and connection.parse_type(active_url) == "mongodb" then
+  local active_db_type = active_url and connection.parse_type(active_url) or "unknown"
+
+  -- Redis: render raw output directly
+  if active_db_type == "redis" then
+    local raw_lines = vim.split(raw, "\n")
+    vim.api.nvim_buf_set_lines(M.result_buf, 0, -1, false, raw_lines)
+    vim.api.nvim_buf_set_option(M.result_buf, "modifiable", false)
+    M.last_result = { columns = {}, rows = {}, row_count = #raw_lines, raw = raw }
+    M.refresh_result_winbar()
+    local status = string.format(" Result: %d lines (%.1fms) ", #raw_lines, elapsed)
+    vim.notify(status, vim.log.levels.INFO)
+    return
+  end
+
+  -- MongoDB: handle result rendering per style
+  if active_db_type == "mongodb" then
     local raw_lines = vim.tbl_filter(function(line)
       if line:match("^%w+> ") or line:match("^%w+>$") then return false end
       if line:match('^Type "it" for more') then return false end
