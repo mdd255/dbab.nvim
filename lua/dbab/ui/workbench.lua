@@ -1045,6 +1045,40 @@ end
 --- Uses indentation-based heuristics since mongosh output is consistently formatted.
 ---@param raw_lines string[]
 ---@return string[]|nil lines, number record_count
+local function collapse_array_objects(parts)
+  if #parts < 2 or not parts[1]:match("^%[") then
+    return parts
+  end
+  local result = { parts[1] }
+  local i = 2
+  while i <= #parts do
+    local indent, content = parts[i]:match("^(%s*)(.*)")
+    if content == "{" then
+      local obj_fields = {}
+      local j = i + 1
+      local is_simple = true
+      while j <= #parts do
+        local _, inner = parts[j]:match("^(%s*)(.*)")
+        if inner == "}" then break end
+        if inner:match("[{%[]") then is_simple = false; break end
+        table.insert(obj_fields, inner)
+        j = j + 1
+      end
+      if is_simple and j <= #parts then
+        table.insert(result, indent .. "{ " .. table.concat(obj_fields, ", ") .. " }")
+        i = j + 1
+      else
+        table.insert(result, parts[i])
+        i = i + 1
+      end
+    else
+      table.insert(result, parts[i])
+      i = i + 1
+    end
+  end
+  return result
+end
+
 local function parse_mongodb_vertical(raw_lines)
   -- Determine the indentation level of top-level document fields
   local field_indent = nil
@@ -1070,7 +1104,7 @@ local function parse_mongodb_vertical(raw_lines)
 
   local function flush_record()
     if accumulating and acc_key then
-      table.insert(fields, { key = acc_key, value = acc_parts })
+      table.insert(fields, { key = acc_key, value = collapse_array_objects(acc_parts) })
       max_key_len = math.max(max_key_len, #acc_key)
       accumulating = false
       acc_key = nil
@@ -1107,7 +1141,7 @@ local function parse_mongodb_vertical(raw_lines)
     local indent_len = #(line:match("^(%s*)") or "")
 
     -- Skip array brackets
-    if trimmed == "[" or trimmed == "]" then
+    if (trimmed == "[" or trimmed == "]") and indent_len < field_indent then
       goto continue
     end
 
@@ -1122,9 +1156,20 @@ local function parse_mongodb_vertical(raw_lines)
 
     -- Field at the expected indent level
     if indent_len == field_indent then
-      -- Close any accumulated nested value first
       if accumulating and acc_key then
-        table.insert(fields, { key = acc_key, value = acc_parts })
+        -- Include closing brace/bracket in the accumulated value
+        local stripped = trimmed:gsub(",$", "")
+        if stripped:match("^[%]}]$") then
+          table.insert(acc_parts, stripped)
+          table.insert(fields, { key = acc_key, value = collapse_array_objects(acc_parts) })
+          max_key_len = math.max(max_key_len, #acc_key)
+          accumulating = false
+          acc_key = nil
+          acc_parts = {}
+          goto continue
+        end
+        -- Not a closing brace — flush accumulated value, then process as field
+        table.insert(fields, { key = acc_key, value = collapse_array_objects(acc_parts) })
         max_key_len = math.max(max_key_len, #acc_key)
         accumulating = false
         acc_key = nil
@@ -1148,7 +1193,8 @@ local function parse_mongodb_vertical(raw_lines)
       end
     elseif indent_len > field_indent and accumulating then
       -- Part of a nested value
-      table.insert(acc_parts, (trimmed:gsub(",$", "")))
+      local rel_indent = string.rep(" ", indent_len - field_indent)
+      table.insert(acc_parts, rel_indent .. (trimmed:gsub(",$", "")))
     end
 
     ::continue::
