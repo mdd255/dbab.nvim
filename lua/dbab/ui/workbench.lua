@@ -1070,7 +1070,7 @@ local function parse_mongodb_vertical(raw_lines)
 
   local function flush_record()
     if accumulating and acc_key then
-      table.insert(fields, { key = acc_key, value = table.concat(acc_parts, " ") })
+      table.insert(fields, { key = acc_key, value = acc_parts })
       max_key_len = math.max(max_key_len, #acc_key)
       accumulating = false
       acc_key = nil
@@ -1081,7 +1081,17 @@ local function parse_mongodb_vertical(raw_lines)
       table.insert(vert_lines, string.format("-[ RECORD %d ]%s", record_num, string.rep("-", 16)))
       for _, f in ipairs(fields) do
         local padded = f.key .. string.rep(" ", max_key_len - #f.key)
-        table.insert(vert_lines, padded .. " | " .. f.value)
+        if type(f.value) == "table" then
+          for j, part in ipairs(f.value) do
+            if j == 1 then
+              table.insert(vert_lines, padded .. " | " .. part)
+            else
+              table.insert(vert_lines, string.rep(" ", max_key_len) .. " | " .. part)
+            end
+          end
+        else
+          table.insert(vert_lines, padded .. " | " .. f.value)
+        end
       end
       fields = {}
       max_key_len = 0
@@ -1114,7 +1124,7 @@ local function parse_mongodb_vertical(raw_lines)
     if indent_len == field_indent then
       -- Close any accumulated nested value first
       if accumulating and acc_key then
-        table.insert(fields, { key = acc_key, value = table.concat(acc_parts, " ") })
+        table.insert(fields, { key = acc_key, value = acc_parts })
         max_key_len = math.max(max_key_len, #acc_key)
         accumulating = false
         acc_key = nil
