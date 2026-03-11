@@ -71,7 +71,13 @@ function M.parse_url(url)
     end
     result.database = database
   else
-    result.host = rest
+    local host, port = rest:match("^(.+):(%d+)$")
+    if host then
+      result.host = host
+      result.port = port
+    else
+      result.host = rest
+    end
   end
 
   return result
