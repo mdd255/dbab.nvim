@@ -36,6 +36,20 @@ local function cli_execute(url, query)
     return table.concat(lines, "\n")
   end
 
+  -- Redis: pass command as arguments (redis-cli / rdcli don't read from stdin reliably)
+  if connection.parse_type(url) == "redis" then
+    -- Split query into words, respecting quoted strings
+    for _, token in ipairs(M._split_redis_args(query)) do
+      table.insert(cmd_list, token)
+    end
+    local lines = vim.fn.systemlist(cmd_list)
+    -- Strip ANSI color codes (rdcli outputs colored text)
+    for i, line in ipairs(lines) do
+      lines[i] = line:gsub("\27%[[%d;]*m", "")
+    end
+    return table.concat(lines, "\n")
+  end
+
   -- Use list form to avoid shell expansion (e.g. '?' in URLs under zsh)
   local lines = vim.fn.systemlist(cmd_list, query)
   return table.concat(lines, "\n")
@@ -61,10 +75,16 @@ local function cli_execute_async(url, query, callback)
   local command, args = adapter.build_cmd(url)
 
   -- MongoDB: pass query via --eval to avoid REPL prompt noise
-  local is_mongodb = connection.parse_type(url) == "mongodb"
+  local db_type = connection.parse_type(url)
+  local is_mongodb = db_type == "mongodb"
+  local is_redis = db_type == "redis"
   if is_mongodb then
     table.insert(args, "--eval")
     table.insert(args, query)
+  elseif is_redis then
+    for _, token in ipairs(M._split_redis_args(query)) do
+      table.insert(args, token)
+    end
   end
 
   local stdout_results = {}
@@ -75,6 +95,10 @@ local function cli_execute_async(url, query, callback)
     args = args,
     on_stdout = function(_, data)
       if data then
+        -- Strip ANSI color codes for Redis (rdcli outputs colored text)
+        if is_redis then
+          data = data:gsub("\27%[[%d;]*m", "")
+        end
         table.insert(stdout_results, data)
       end
     end,
@@ -96,7 +120,7 @@ local function cli_execute_async(url, query, callback)
       end)
     end,
   }
-  if not is_mongodb then
+  if not is_mongodb and not is_redis then
     job_opts.writer = query
   end
   Job:new(job_opts):start()
@@ -273,6 +297,45 @@ function M.execute_active_async(query, callback)
     return
   end
   M.execute_async(url, query, callback)
+end
+
+--- Split a Redis command string into arguments, respecting quoted strings.
+--- e.g. "SET foo 'hello world'" -> {"SET", "foo", "hello world"}
+---@param query string
+---@return string[]
+function M._split_redis_args(query)
+  local args = {}
+  local i = 1
+  local len = #query
+  while i <= len do
+    -- Skip whitespace
+    while i <= len and query:sub(i, i):match("%s") do
+      i = i + 1
+    end
+    if i > len then
+      break
+    end
+    local ch = query:sub(i, i)
+    if ch == '"' or ch == "'" then
+      -- Quoted string
+      local quote = ch
+      i = i + 1
+      local start = i
+      while i <= len and query:sub(i, i) ~= quote do
+        i = i + 1
+      end
+      table.insert(args, query:sub(start, i - 1))
+      i = i + 1 -- skip closing quote
+    else
+      -- Unquoted token
+      local start = i
+      while i <= len and not query:sub(i, i):match("%s") do
+        i = i + 1
+      end
+      table.insert(args, query:sub(start, i - 1))
+    end
+  end
+  return args
 end
 
 return M

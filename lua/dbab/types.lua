@@ -209,7 +209,6 @@
 
 ---@class Dbab.RedisConfig
 ---@field command? string Redis CLI command (default "redis-cli", e.g. "rdcli")
----@field url_mode? boolean Pass URL via -u flag instead of parsed -h/-p flags (default false)
 
 ---@alias Dbab.DatabaseType "postgres"|"mysql"|"sqlite"|"mongodb"|"redis"|"unknown"
 

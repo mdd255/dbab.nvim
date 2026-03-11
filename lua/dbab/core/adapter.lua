@@ -163,43 +163,25 @@ end
 function M._build_redis(url)
   local parsed = M.parse_url(url)
   local config = require("dbab.config")
-  local redis_cfg = config.get().redis or {}
-  local redis_cmd = redis_cfg.command or "redis-cli"
+  local redis_cmd = config.get().redis and config.get().redis.command or "redis-cli"
   local args = {}
 
-  if redis_cfg.url_mode then
-    -- Pass URL directly via -u flag (for tools like rdcli)
-    local conn_url = url
-    -- Strip database from URL for -u, pass separately via -n
-    if parsed.database and parsed.database ~= "" then
-      conn_url = conn_url:gsub("/" .. parsed.database .. "$", "")
-      conn_url = conn_url:gsub("/" .. parsed.database .. "(%?)", "%1")
-    end
-    table.insert(args, "-u")
-    table.insert(args, conn_url)
-    if parsed.database and parsed.database ~= "" then
-      table.insert(args, "-n")
-      table.insert(args, parsed.database)
-    end
-  else
-    -- Pass parsed flags (for redis-cli)
-    if parsed.host then
-      table.insert(args, "-h")
-      table.insert(args, parsed.host)
-    end
-    if parsed.port then
-      table.insert(args, "-p")
-      table.insert(args, parsed.port)
-    end
-    if parsed.password then
-      table.insert(args, "-a")
-      table.insert(args, parsed.password)
-      table.insert(args, "--no-auth-warning")
-    end
-    if parsed.database and parsed.database ~= "" then
-      table.insert(args, "-n")
-      table.insert(args, parsed.database)
-    end
+  if parsed.host then
+    table.insert(args, "-h")
+    table.insert(args, parsed.host)
+  end
+  if parsed.port then
+    table.insert(args, "-p")
+    table.insert(args, parsed.port)
+  end
+  if parsed.password then
+    table.insert(args, "-a")
+    table.insert(args, parsed.password)
+    table.insert(args, "--no-auth-warning")
+  end
+  if parsed.database and parsed.database ~= "" then
+    table.insert(args, "-n")
+    table.insert(args, parsed.database)
   end
 
   return redis_cmd, args
