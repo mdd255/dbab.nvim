@@ -1534,28 +1534,35 @@ function M.execute_query()
 	end
 	M.history_index = 0
 
+	vim.notify("[dbab] Executing query...", vim.log.levels.INFO)
+
 	local start_time = vim.loop.hrtime()
-	local result = executor.execute(url, query)
-	local elapsed = (vim.loop.hrtime() - start_time) / 1e6
+	executor.execute_async(url, query, function(result, err)
+		local elapsed = (vim.loop.hrtime() - start_time) / 1e6
 
-	local parsed_result = parser.parse(result)
-	query_history.add({
-		query = query,
-		timestamp = os.time(),
-		conn_name = conn_name or "unknown",
-		duration_ms = elapsed,
-		row_count = parsed_result and parsed_result.row_count or 0,
-	})
+		if err then
+			result = result ~= "" and result or err
+		end
 
-	if M.history_win and vim.api.nvim_win_is_valid(M.history_win) then
-		get_history_ui().render()
-	end
+		local parsed_result = parser.parse(result)
+		query_history.add({
+			query = query,
+			timestamp = os.time(),
+			conn_name = conn_name or "unknown",
+			duration_ms = elapsed,
+			row_count = parsed_result and parsed_result.row_count or 0,
+		})
 
-	M.last_query = query
-	M.last_duration = elapsed
-	M.last_conn_name = conn_name
-	M.last_timestamp = os.time()
-	M.show_result(result, elapsed)
+		if M.history_win and vim.api.nvim_win_is_valid(M.history_win) then
+			get_history_ui().render()
+		end
+
+		M.last_query = query
+		M.last_duration = elapsed
+		M.last_conn_name = conn_name
+		M.last_timestamp = os.time()
+		M.show_result(result, elapsed)
+	end)
 end
 
 ---@return number|nil
