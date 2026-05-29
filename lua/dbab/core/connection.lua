@@ -32,7 +32,8 @@ end
 ---@param url string
 ---@return string Resolved URL (환경변수 확장)
 function M.resolve_url(url)
-	if url:match("^%$") then
+	-- Whole-string form: "$VAR" -> value of VAR (the entire URL is in the env var)
+	if url:match("^%$[%w_]+$") then
 		local env_var = url:sub(2)
 		local resolved = os.getenv(env_var)
 		if resolved then
@@ -41,7 +42,24 @@ function M.resolve_url(url)
 		vim.notify("[dbab] Environment variable not found: " .. env_var, vim.log.levels.ERROR)
 		return url
 	end
-	return url
+
+	-- Inline forms: "${VAR}" and "$VAR" embedded anywhere in the URL
+	local function expand(name)
+		local val = os.getenv(name)
+		if not val then
+			vim.notify("[dbab] Environment variable not found: " .. name, vim.log.levels.ERROR)
+			return nil
+		end
+		return val
+	end
+
+	local result = url:gsub("%${([%w_]+)}", function(name)
+		return expand(name) or ("${" .. name .. "}")
+	end)
+	result = result:gsub("%$([%w_]+)", function(name)
+		return expand(name) or ("$" .. name)
+	end)
+	return result
 end
 
 ---@param name string
@@ -83,6 +101,19 @@ end
 ---@return boolean
 function M.is_connected(name)
 	return M.connected_names[name] == true
+end
+
+--- Mark a connection as disconnected. Clears active state if it was active.
+---@param name string
+---@return boolean true if it had been connected
+function M.disconnect(name)
+	local was = M.connected_names[name] == true
+	M.connected_names[name] = nil
+	if M.active_name == name then
+		M.active_name = nil
+		M.active_url = nil
+	end
+	return was
 end
 
 ---@return string|nil

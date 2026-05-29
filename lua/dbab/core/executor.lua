@@ -9,6 +9,44 @@ local function use_dadbod()
 	return config.get().executor == "dadbod"
 end
 
+--- Run `fn` with `env` vars set in vim.env, restoring previous values afterward.
+--- Used so secrets (passwords) reach the child via env instead of argv.
+---@param env table|nil
+---@param fn fun(): any
+---@return any
+local function with_env(env, fn)
+	if not env then
+		return fn()
+	end
+	local saved = {}
+	for k, v in pairs(env) do
+		saved[k] = vim.env[k]
+		vim.env[k] = v
+	end
+	local ok, res = pcall(fn)
+	for k in pairs(env) do
+		vim.env[k] = saved[k]
+	end
+	if not ok then
+		error(res, 0)
+	end
+	return res
+end
+
+--- Merge `env` over a copy of the current process environment (for plenary Job).
+---@param env table|nil
+---@return table|nil
+local function merged_env(env)
+	if not env then
+		return nil
+	end
+	local merged = vim.fn.environ()
+	for k, v in pairs(env) do
+		merged[k] = v
+	end
+	return merged
+end
+
 -- ============================================
 -- CLI backend
 -- ============================================
@@ -18,7 +56,7 @@ end
 ---@return string
 local function cli_execute(url, query)
 	local adapter = require("dbab.core.adapter")
-	local command, args = adapter.build_cmd(url)
+	local command, args, env = adapter.build_cmd(url)
 
 	local cmd_list = { command }
 	for _, arg in ipairs(args) do
@@ -29,7 +67,9 @@ local function cli_execute(url, query)
 	if connection.parse_type(url) == "mongodb" then
 		table.insert(cmd_list, "--eval")
 		table.insert(cmd_list, query)
-		local lines = vim.fn.systemlist(cmd_list)
+		local lines = with_env(env, function()
+			return vim.fn.systemlist(cmd_list)
+		end)
 		if vim.v.shell_error ~= 0 then
 			vim.notify(
 				"[dbab] mongosh error (exit " .. vim.v.shell_error .. "): " .. table.concat(lines, " "),
@@ -45,7 +85,9 @@ local function cli_execute(url, query)
 		for _, token in ipairs(M._split_redis_args(query)) do
 			table.insert(cmd_list, token)
 		end
-		local lines = vim.fn.systemlist(cmd_list)
+		local lines = with_env(env, function()
+			return vim.fn.systemlist(cmd_list)
+		end)
 		for i, line in ipairs(lines) do
 			-- Strip ANSI color codes (rdcli outputs colored text)
 			line = line:gsub("\27%[[%d;]*m", "")
@@ -57,7 +99,9 @@ local function cli_execute(url, query)
 	end
 
 	-- Use list form to avoid shell expansion (e.g. '?' in URLs under zsh)
-	local lines = vim.fn.systemlist(cmd_list, query)
+	local lines = with_env(env, function()
+		return vim.fn.systemlist(cmd_list, query)
+	end)
 	return table.concat(lines, "\n")
 end
 
@@ -78,7 +122,7 @@ local function cli_execute_async(url, query, callback)
 	end
 
 	local adapter = require("dbab.core.adapter")
-	local command, args = adapter.build_cmd(url)
+	local command, args, env = adapter.build_cmd(url)
 
 	-- MongoDB: pass query via --eval to avoid REPL prompt noise
 	local db_type = connection.parse_type(url)
@@ -131,6 +175,7 @@ local function cli_execute_async(url, query, callback)
 	if not is_mongodb and not is_redis then
 		job_opts.writer = query
 	end
+	job_opts.env = merged_env(env)
 	Job:new(job_opts):start()
 end
 
