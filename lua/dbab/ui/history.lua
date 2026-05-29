@@ -889,15 +889,20 @@ function M.setup_keymaps(buf)
 		end
 	end, opts)
 
-	-- Clear history
+	-- Clear history for current connection
 	vim.keymap.set("n", keymaps.clear, function()
+		local conn = get_current_connection_name()
+		if not conn then
+			vim.notify("[dbab] No active connection", vim.log.levels.WARN)
+			return
+		end
 		vim.ui.select({ "Yes", "No" }, {
-			prompt = "Clear all history?",
+			prompt = "Clear history for " .. conn .. "?",
 		}, function(choice)
 			if choice == "Yes" then
-				history.clear()
+				history.clear_for_connection(conn)
 				M.render()
-				vim.notify("[dbab] History cleared", vim.log.levels.INFO)
+				vim.notify("[dbab] History cleared for " .. conn, vim.log.levels.INFO)
 			end
 		end)
 	end, opts)

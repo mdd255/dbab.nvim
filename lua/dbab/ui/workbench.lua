@@ -397,7 +397,7 @@ M.editor_buf = nil
 
 --- Render the tab bar line for winbar (uses statusline syntax for highlights)
 -- Fixed total tab width (icon + name + padding)
-local TAB_TOTAL_WIDTH = 16
+local TAB_TOTAL_WIDTH = 28
 local ICON_WIDTH = 2 -- nerd font icon display width
 
 --- Truncate name if too long
@@ -1553,13 +1553,15 @@ function M.execute_query()
 		end
 
 		local parsed_result = parser.parse(result)
-		query_history.add({
-			query = query,
-			timestamp = os.time(),
-			conn_name = conn_name or "unknown",
-			duration_ms = elapsed,
-			row_count = parsed_result and parsed_result.row_count or 0,
-		})
+		if not is_error_result(result) then
+			query_history.add({
+				query = query,
+				timestamp = os.time(),
+				conn_name = conn_name or "unknown",
+				duration_ms = elapsed,
+				row_count = parsed_result and parsed_result.row_count or 0,
+			})
+		end
 
 		if M.history_win and vim.api.nvim_win_is_valid(M.history_win) then
 			get_history_ui().render()

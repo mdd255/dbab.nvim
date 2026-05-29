@@ -120,6 +120,19 @@ function M.clear()
 	M.save()
 end
 
+--- Clear history for a specific connection
+---@param conn_name string
+function M.clear_for_connection(conn_name)
+	local kept = {}
+	for _, entry in ipairs(M.entries) do
+		if entry.conn_name ~= conn_name then
+			table.insert(kept, entry)
+		end
+	end
+	M.entries = kept
+	M.save()
+end
+
 --- Delete a specific history entry by index
 ---@param index number 1-based index
 function M.delete(index)
