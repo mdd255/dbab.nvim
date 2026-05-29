@@ -2,6 +2,54 @@
 
 local M = {}
 
+--- Extract the substring of `line` spanning display columns [from, to] (1-based, inclusive).
+--- Column boundaries come from psql's ASCII separator line, where byte position equals
+--- display column. Data lines may contain UTF-8, where byte offset != display column, so
+--- pure byte slicing corrupts multibyte cells. ASCII lines take a fast path (no behavior change).
+---@param line string
+---@param from number
+---@param to number
+---@return string
+local function slice_display(line, from, to)
+	if not line:find("[\128-\255]") then
+		if from > #line then
+			return ""
+		end
+		return line:sub(from, math.min(to, #line))
+	end
+
+	local out = {}
+	local col = 1
+	local i = 1
+	local n = #line
+	while i <= n do
+		local b = line:byte(i)
+		local len = 1
+		if b >= 0xF0 then
+			len = 4
+		elseif b >= 0xE0 then
+			len = 3
+		elseif b >= 0xC0 then
+			len = 2
+		end
+		local ch = line:sub(i, i + len - 1)
+		local w = vim.fn.strdisplaywidth(ch)
+		if w == 0 then
+			w = 1
+		end
+		-- char occupies display cols [col, col+w-1]
+		if col + w - 1 >= from and col <= to then
+			table.insert(out, ch)
+		end
+		col = col + w
+		i = i + len
+		if col > to then
+			break
+		end
+	end
+	return table.concat(out)
+end
+
 ---@param raw string Raw output from database
 ---@param style? Dbab.ResultStyle "table" (default), "json", "raw", "vertical", "markdown"
 ---@return Dbab.QueryResult
@@ -34,13 +82,20 @@ function M.parse(raw, style)
 			table.insert(json_data, item)
 		end
 
-		local lines = { "[" }
-		for idx, item in ipairs(json_data) do
+		-- Encode each item first, then join with commas, so a skipped (failed) item
+		-- never leaves a dangling comma that would produce invalid JSON.
+		local encoded = {}
+		for _, item in ipairs(json_data) do
 			local ok, item_str = pcall(vim.json.encode, item)
 			if ok then
-				local suffix = idx < #json_data and "," or ""
-				table.insert(lines, "  " .. item_str .. suffix)
+				table.insert(encoded, item_str)
 			end
+		end
+
+		local lines = { "[" }
+		for idx, item_str in ipairs(encoded) do
+			local suffix = idx < #encoded and "," or ""
+			table.insert(lines, "  " .. item_str .. suffix)
 		end
 		table.insert(lines, "]")
 
@@ -50,7 +105,7 @@ function M.parse(raw, style)
 		for _, line in ipairs(lines) do
 			table.insert(result.rows, { line })
 		end
-		result.row_count = #json_data
+		result.row_count = #encoded
 		return result
 	end
 
@@ -203,11 +258,7 @@ function M.parse_table(raw)
 		if line ~= "" then
 			local row = {}
 			for _, col_pos in ipairs(col_positions) do
-				local cell = ""
-				if col_pos.start <= #line then
-					cell = line:sub(col_pos.start, math.min(col_pos.finish, #line))
-					cell = vim.trim(cell)
-				end
+				local cell = vim.trim(slice_display(line, col_pos.start, col_pos.finish))
 				table.insert(row, cell)
 			end
 			table.insert(result.rows, row)

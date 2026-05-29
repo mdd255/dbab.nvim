@@ -4,6 +4,21 @@ local config = require("dbab.config")
 
 local M = {}
 
+--- Escape a SQL string literal (single quotes) for safe interpolation.
+--- Identifiers from the DB can contain quotes; without escaping the query breaks.
+---@param s string
+---@return string
+local function sql_escape(s)
+	return (s:gsub("'", "''"))
+end
+
+--- Escape a value for embedding in a double-quoted JS string (mongosh --eval).
+---@param s string
+---@return string
+local function js_escape(s)
+	return (s:gsub("\\", "\\\\"):gsub('"', '\\"'))
+end
+
 -- In-memory cache for schema data
 local cache = {
 	by_url = {},
@@ -217,7 +232,7 @@ function M.get_tables(url, schema_name)
       WHERE table_schema = '%s'
       ORDER BY table_type, table_name
     ]],
-			schema_name
+			sql_escape(schema_name)
 		)
 	elseif db_type == "mysql" then
 		query = [[
@@ -355,8 +370,8 @@ function M.get_columns(url, table_name)
       WHERE c.table_name = '%s' AND c.table_schema = 'public'
       ORDER BY c.ordinal_position
     ]],
-			table_name,
-			table_name
+			sql_escape(table_name),
+			sql_escape(table_name)
 		)
 	elseif db_type == "mysql" then
 		query = string.format(
@@ -370,10 +385,10 @@ function M.get_columns(url, table_name)
       WHERE table_name = '%s' AND table_schema = DATABASE()
       ORDER BY ordinal_position
     ]],
-			table_name
+			sql_escape(table_name)
 		)
 	elseif db_type == "sqlite" then
-		query = string.format("PRAGMA table_info('%s')", table_name)
+		query = string.format("PRAGMA table_info('%s')", sql_escape(table_name))
 	elseif db_type == "mongodb" then
 		query = string.format(
 			[[
@@ -397,7 +412,7 @@ try {
   print("_error\t" + err.message + "\tNO\tNO");
 }
 ]],
-			table_name
+			js_escape(table_name)
 		)
 	elseif db_type == "redis" then
 		url_cache.columns[table_name] = {}
@@ -587,7 +602,7 @@ function M.get_tables_async(url, schema_name, callback)
       WHERE table_schema = '%s'
       ORDER BY table_type, table_name
     ]],
-			schema_name
+			sql_escape(schema_name)
 		)
 	elseif db_type == "mysql" then
 		query = [[
@@ -669,8 +684,8 @@ function M.get_columns_async(url, table_name, callback)
       WHERE c.table_name = '%s' AND c.table_schema = 'public'
       ORDER BY c.ordinal_position
     ]],
-			table_name,
-			table_name
+			sql_escape(table_name),
+			sql_escape(table_name)
 		)
 	elseif db_type == "mysql" then
 		query = string.format(
@@ -684,10 +699,10 @@ function M.get_columns_async(url, table_name, callback)
       WHERE table_name = '%s' AND table_schema = DATABASE()
       ORDER BY ordinal_position
     ]],
-			table_name
+			sql_escape(table_name)
 		)
 	elseif db_type == "sqlite" then
-		query = string.format("PRAGMA table_info('%s')", table_name)
+		query = string.format("PRAGMA table_info('%s')", sql_escape(table_name))
 	elseif db_type == "mongodb" then
 		query = string.format(
 			[[
@@ -711,7 +726,7 @@ try {
   print("_error\t" + err.message + "\tNO\tNO");
 }
 ]],
-			table_name
+			js_escape(table_name)
 		)
 	elseif db_type == "redis" then
 		url_cache.columns[table_name] = {}
