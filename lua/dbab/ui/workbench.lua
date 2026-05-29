@@ -616,13 +616,14 @@ function M.create_new_tab(name, content, conn_name, is_saved)
 	-- Generate unique name for new queries
 	local tab_name = name
 	if not tab_name then
+		local conn_prefix = conn:gsub("[^%w]", "-")
 		local count = 1
 		for _, t in ipairs(M.query_tabs) do
-			if t.name:match("^query%-") then
+			if t.name:match("^" .. vim.pesc(conn_prefix) .. "%-") then
 				count = count + 1
 			end
 		end
-		tab_name = "query-" .. count
+		tab_name = conn_prefix .. "-" .. count
 	end
 
 	---@type Dbab.QueryTab
@@ -995,7 +996,7 @@ function M.save_query_by_buf(buf, callback)
 		vim.schedule(function()
 			vim.ui.input({
 				prompt = "Query name: ",
-				default = tab.name:match("^query%-") and "" or tab.name,
+				default = "",
 			}, function(input)
 				if input and input ~= "" then
 					-- Check if already exists
@@ -1862,43 +1863,17 @@ function M.open_editor_with_query(query)
 	M.open_editor(query)
 end
 
---- Run a history entry (load into editor + execute, with confirm for mutations)
+--- Run a history entry (load into editor + execute)
 ---@param entry Dbab.HistoryEntry|nil
 function M.run_history_entry(entry)
 	if not entry then
 		return
 	end
 
-	local _, verb = query_history.format_summary(entry)
-
-	local function do_execute()
-		M.open_editor_with_query(entry.query)
-		vim.schedule(function()
-			M.execute_query()
-		end)
-	end
-
-	if verb == "SEL" then
-		do_execute()
-	else
-		local verb_names = {
-			INS = "INSERT",
-			UPD = "UPDATE",
-			DEL = "DELETE",
-			CRT = "CREATE",
-			DRP = "DROP",
-			ALT = "ALTER",
-			TRC = "TRUNCATE",
-		}
-		local verb_name = verb_names[verb] or verb
-		vim.ui.select({ "Execute", "Cancel" }, {
-			prompt = "Execute " .. verb_name .. " query?",
-		}, function(choice)
-			if choice == "Execute" then
-				do_execute()
-			end
-		end)
-	end
+	M.open_editor_with_query(entry.query)
+	vim.schedule(function()
+		M.execute_query()
+	end)
 end
 
 --- Open the history query picker and run the selected entry
@@ -2175,6 +2150,11 @@ function M.yank_all_rows()
 end
 
 function M.close()
+	for _, tab in ipairs(M.query_tabs) do
+		if tab.buf and vim.api.nvim_buf_is_valid(tab.buf) then
+			pcall(vim.api.nvim_buf_delete, tab.buf, { force = true })
+		end
+	end
 	if M.tab_nr and vim.api.nvim_tabpage_is_valid(M.tab_nr) then
 		vim.cmd("tabclose")
 	end

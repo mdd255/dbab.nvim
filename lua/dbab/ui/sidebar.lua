@@ -532,11 +532,7 @@ function M.toggle_node()
 			M.loading_conn_name = node.name
 			M.error_conns[node.name] = nil
 			connection.set_active(node.name)
-			for _, tab in ipairs(workbench.query_tabs) do
-				if tab.conn_name == "no connection" then
-					tab.conn_name = node.name
-				end
-			end
+			vim.notify("[dbab] Connecting to " .. node.name .. "...", vim.log.levels.INFO)
 			M.refresh()
 
 			local url = connection.get_active_url()
@@ -559,6 +555,10 @@ function M.toggle_node()
 						M.refresh()
 						workbench.refresh_history()
 						vim.notify("[dbab] Connected to: " .. node.name, vim.log.levels.INFO)
+						workbench.create_new_tab(nil, nil, node.name, false)
+						if workbench.editor_win and vim.api.nvim_win_is_valid(workbench.editor_win) then
+							vim.api.nvim_set_current_win(workbench.editor_win)
+						end
 						return
 					end
 
@@ -572,6 +572,10 @@ function M.toggle_node()
 								M.refresh()
 								workbench.refresh_history()
 								vim.notify("[dbab] Connected to: " .. node.name, vim.log.levels.INFO)
+								workbench.create_new_tab(nil, nil, node.name, false)
+								if workbench.editor_win and vim.api.nvim_win_is_valid(workbench.editor_win) then
+									vim.api.nvim_set_current_win(workbench.editor_win)
+								end
 							end
 						end)
 					end
