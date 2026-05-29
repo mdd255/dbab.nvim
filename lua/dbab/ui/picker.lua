@@ -66,7 +66,20 @@ end
 ---@param on_select fun(entry: Dbab.HistoryEntry|nil)
 function M.open_history(on_select)
 	history.load()
-	local entries = history.get_all()
+	local all_entries = history.get_all()
+
+	-- Filter to current active connection
+	local conn_name = connection.get_active_name()
+	local entries = {}
+	if conn_name then
+		for _, entry in ipairs(all_entries) do
+			if entry.conn_name == conn_name then
+				table.insert(entries, entry)
+			end
+		end
+	else
+		entries = all_entries
+	end
 
 	if #entries == 0 then
 		vim.notify("[dbab] No history yet", vim.log.levels.WARN)
@@ -75,18 +88,13 @@ function M.open_history(on_select)
 	end
 
 	local lines = {}
-	local max_query = 60
+	local max_query = 72
 	for _, entry in ipairs(entries) do
-		local _, verb = history.format_summary(entry)
-		local icon = history.get_verb_icon(verb)
-		local time_str = os.date("%H:%M", entry.timestamp)
-		local conn = entry.conn_name and ("[" .. entry.conn_name .. "] ") or ""
 		local query = entry.query:gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
 		if vim.fn.strdisplaywidth(query) > max_query then
 			query = vim.fn.strcharpart(query, 0, max_query) .. "…"
 		end
-		local label = string.format("%s %s %s%s", icon, time_str, conn, query)
-		table.insert(lines, Menu.item(label, { entry = entry }))
+		table.insert(lines, Menu.item(query, { entry = entry }))
 	end
 
 	local menu = Menu({

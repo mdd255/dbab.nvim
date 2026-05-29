@@ -84,14 +84,24 @@ end
 --- Add a new history entry
 ---@param entry Dbab.HistoryEntry
 function M.add(entry)
-	local cfg = config.get()
-
 	-- Add to beginning (newest first)
 	table.insert(M.entries, 1, entry)
 
-	-- Trim to max entries
-	while #M.entries > cfg.history.max_entries do
-		table.remove(M.entries)
+	-- Trim to max 100 entries per connection
+	local conn_name = entry.conn_name
+	local count = 0
+	local i = 1
+	while i <= #M.entries do
+		if M.entries[i].conn_name == conn_name then
+			count = count + 1
+			if count > 100 then
+				table.remove(M.entries, i)
+			else
+				i = i + 1
+			end
+		else
+			i = i + 1
+		end
 	end
 
 	-- Save to disk
