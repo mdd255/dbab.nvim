@@ -570,33 +570,56 @@ function M.close_tab()
 			if choice == "Save" then
 				M.save_current_query(function(success)
 					if success then
-						M._do_close_tab()
+						M._do_close_tab(tab)
 					end
 				end)
 			elseif choice == "Don't Save" then
-				M._do_close_tab()
+				M._do_close_tab(tab)
 			end
 			-- Cancel: do nothing
 		end)
 	else
-		M._do_close_tab()
+		M._do_close_tab(tab)
 	end
 end
 
-function M._do_close_tab()
-	local tab = M.query_tabs[M.active_tab]
-	local old_buf = tab.buf
+--- Close a tab. Closes `target` (by identity) if given, else the active tab.
+--- Resolving by identity avoids closing the wrong tab if the active tab changed
+--- while an async save/confirm dialog was open.
+---@param target? Dbab.QueryTab
+function M._do_close_tab(target)
+	target = target or M.query_tabs[M.active_tab]
+	if not target then
+		return
+	end
+
+	local idx
+	for i, t in ipairs(M.query_tabs) do
+		if t == target then
+			idx = i
+			break
+		end
+	end
+	if not idx then
+		-- Already closed (e.g. double-fired callback)
+		return
+	end
+
+	local old_buf = target.buf
 
 	-- Remove from list first
-	table.remove(M.query_tabs, M.active_tab)
+	table.remove(M.query_tabs, idx)
 
 	if #M.query_tabs == 0 then
 		-- No more tabs, create a new one (this sets the editor window buffer)
 		M.create_new_tab()
 	else
-		-- Switch to the nearest remaining tab BEFORE deleting the old buffer,
-		-- so the editor window always has a valid buffer displayed
-		M.active_tab = math.min(M.active_tab, #M.query_tabs)
+		-- Keep the same tab focused after the index shift, then switch BEFORE
+		-- deleting the old buffer so the editor window always shows a valid buffer
+		if M.active_tab > idx then
+			M.active_tab = M.active_tab - 1
+		end
+		M.active_tab = math.min(math.max(M.active_tab, 1), #M.query_tabs)
 		M.switch_tab(M.active_tab)
 	end
 
@@ -972,6 +995,13 @@ function M.save_query_by_buf(buf, callback)
 	end
 
 	-- Get content
+	if not (tab.buf and vim.api.nvim_buf_is_valid(tab.buf)) then
+		vim.notify("[dbab] Query buffer no longer valid", vim.log.levels.WARN)
+		if callback then
+			callback(false)
+		end
+		return
+	end
 	local lines = vim.api.nvim_buf_get_lines(tab.buf, 0, -1, false)
 	local content = table.concat(lines, "\n")
 

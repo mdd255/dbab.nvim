@@ -2,6 +2,33 @@ local connection = require("dbab.core.connection")
 
 local M = {}
 
+--- Percent-decode a URL component (e.g. "%40" -> "@", "+" -> space).
+---@param s string
+---@return string
+local function url_decode(s)
+	s = s:gsub("+", " ")
+	s = s:gsub("%%(%x%x)", function(hex)
+		return string.char(tonumber(hex, 16))
+	end)
+	return s
+end
+
+--- Remove ":password@" from a URL so the secret never lands in argv (visible via `ps`).
+---@param url string
+---@param password string|nil
+---@return string
+local function strip_password(url, password)
+	if not password or password == "" then
+		return url
+	end
+	local needle = ":" .. password .. "@"
+	local idx = url:find(needle, 1, true)
+	if idx then
+		return url:sub(1, idx - 1) .. "@" .. url:sub(idx + #needle)
+	end
+	return url
+end
+
 ---@param url string
 ---@return table parsed { scheme, user, password, host, port, database, params }
 function M.parse_url(url)
@@ -43,8 +70,14 @@ function M.parse_url(url)
 
 	if query_string then
 		result.params = {}
-		for key, value in query_string:gmatch("([^&=]+)=([^&=]+)") do
-			result.params[key] = value
+		for pair in query_string:gmatch("[^&]+") do
+			local key, value = pair:match("^([^=]+)=(.*)$")
+			if key then
+				result.params[url_decode(key)] = url_decode(value)
+			else
+				-- valueless param, e.g. "?sslmode" -> {sslmode = ""}
+				result.params[url_decode(pair)] = ""
+			end
 		end
 	end
 
@@ -105,8 +138,12 @@ function M.build_cmd(url)
 end
 
 ---@param url string
----@return string command, string[] args
+---@return string command, string[] args, table|nil env
 function M._build_postgres(url)
+	local parsed = M.parse_url(url)
+	if parsed.password and parsed.password ~= "" then
+		return "psql", { strip_password(url, parsed.password) }, { PGPASSWORD = parsed.password }
+	end
 	return "psql", { url }
 end
 
@@ -141,14 +178,17 @@ function M._build_mysql(url)
 		table.insert(args, "-u")
 		table.insert(args, parsed.user)
 	end
-	if parsed.password then
-		table.insert(args, "-p" .. parsed.password)
-	end
 	if parsed.database then
 		table.insert(args, parsed.database)
 	end
 
-	return command, args
+	-- Pass password via MYSQL_PWD env, not -p<pw> argv (which leaks via `ps`).
+	local env
+	if parsed.password and parsed.password ~= "" then
+		env = { MYSQL_PWD = parsed.password }
+	end
+
+	return command, args, env
 end
 
 ---@param url string
@@ -180,9 +220,10 @@ function M._build_redis(url)
 		table.insert(args, "-p")
 		table.insert(args, parsed.port)
 	end
-	if parsed.password then
-		table.insert(args, "-a")
-		table.insert(args, parsed.password)
+	-- Pass auth via REDISCLI_AUTH env, not -a <pw> argv (which leaks via `ps`).
+	local env
+	if parsed.password and parsed.password ~= "" then
+		env = { REDISCLI_AUTH = parsed.password }
 		table.insert(args, "--no-auth-warning")
 	end
 	if parsed.database and parsed.database ~= "" then
@@ -190,7 +231,7 @@ function M._build_redis(url)
 		table.insert(args, parsed.database)
 	end
 
-	return redis_cmd, args
+	return redis_cmd, args, env
 end
 
 return M

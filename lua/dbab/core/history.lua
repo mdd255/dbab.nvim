@@ -87,14 +87,15 @@ function M.add(entry)
 	-- Add to beginning (newest first)
 	table.insert(M.entries, 1, entry)
 
-	-- Trim to max 100 entries per connection
+	-- Trim to configured max entries per connection
+	local limit = config.get().history.max_entries or 100
 	local conn_name = entry.conn_name
 	local count = 0
 	local i = 1
 	while i <= #M.entries do
 		if M.entries[i].conn_name == conn_name then
 			count = count + 1
-			if count > 100 then
+			if count > limit then
 				table.remove(M.entries, i)
 			else
 				i = i + 1

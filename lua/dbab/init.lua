@@ -48,6 +48,21 @@ function M.connect(name)
 	end
 end
 
+--- Disconnect a connection by name (defaults to the active one)
+---@param name? string
+function M.disconnect(name)
+	name = name or M.core.connection.get_active_name()
+	if not name then
+		vim.notify("[dbab] No active connection to disconnect", vim.log.levels.WARN)
+		return
+	end
+	if M.core.connection.disconnect(name) then
+		vim.notify("[dbab] Disconnected: " .. name, vim.log.levels.INFO)
+	else
+		vim.notify("[dbab] Not connected: " .. name, vim.log.levels.WARN)
+	end
+end
+
 --- List available connections
 function M.list_connections()
 	local connections = M.core.connection.list_connections()

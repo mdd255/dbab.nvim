@@ -48,13 +48,29 @@ function M.warmup(callback, url)
 
 	M.is_loading_flag = true
 
+	-- Safety net: if an async callback never fires (e.g. a hung job), clear the flag
+	-- so future warmups aren't blocked forever.
+	local done = false
+	local function finish()
+		if done then
+			return
+		end
+		done = true
+		M.is_loading_flag = false
+		if callback then
+			callback()
+		end
+	end
+	vim.defer_fn(function()
+		if M.is_loading_flag and not done then
+			finish()
+		end
+	end, 30000)
+
 	-- Load schemas first (async)
 	schema.get_schemas_async(target_url, function(schemas, err)
 		if err or #schemas == 0 then
-			M.is_loading_flag = false
-			if callback then
-				callback()
-			end
+			finish()
 			return
 		end
 
@@ -63,10 +79,7 @@ function M.warmup(callback, url)
 		local total = #schemas
 
 		if total == 0 then
-			M.is_loading_flag = false
-			if callback then
-				callback()
-			end
+			finish()
 			return
 		end
 
@@ -77,10 +90,7 @@ function M.warmup(callback, url)
 
 				-- Check if all schemas are loaded
 				if pending >= total then
-					M.is_loading_flag = false
-					if callback then
-						callback()
-					end
+					finish()
 				end
 			end)
 		end
