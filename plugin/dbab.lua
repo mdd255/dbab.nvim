@@ -22,6 +22,10 @@ vim.api.nvim_create_user_command("Dbab", function(opts)
 		end
 	elseif subcmd == "pick" then
 		dbab.pick_connection()
+	elseif subcmd == "history" then
+		dbab.pick_history()
+	elseif subcmd == "toggle-history" then
+		dbab.toggle_history()
 	elseif subcmd == "list" then
 		dbab.list_connections()
 	elseif subcmd == "query" or subcmd == "q" then
@@ -42,7 +46,7 @@ end, {
 	complete = function(arg_lead, cmd_line, _)
 		local args = vim.split(cmd_line, "%s+")
 		if #args <= 2 then
-			local subcommands = { "connect", "pick", "list", "query" }
+			local subcommands = { "connect", "pick", "history", "toggle-history", "list", "query" }
 			return vim.tbl_filter(function(s)
 				return s:match("^" .. arg_lead)
 			end, subcommands)

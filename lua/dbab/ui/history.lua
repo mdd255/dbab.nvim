@@ -923,6 +923,9 @@ function M.setup_keymaps(buf)
 			vim.api.nvim_set_current_win(workbench.result_win)
 		end
 	end, opts)
+
+	-- Global keymaps (history picker, toggle history)
+	require("dbab.ui.workbench").setup_global_buf_keymaps(buf)
 end
 
 --- Handle entry selection (load or execute based on config)
@@ -958,37 +961,7 @@ function M.execute_entry()
 		return
 	end
 
-	local workbench = require("dbab.ui.workbench")
-	local _, verb = history.format_summary(entry)
-
-	local function do_execute()
-		workbench.open_editor_with_query(entry.query)
-		vim.schedule(function()
-			workbench.execute_query()
-		end)
-	end
-
-	if verb == "SEL" then
-		do_execute()
-	else
-		local verb_names = {
-			INS = "INSERT",
-			UPD = "UPDATE",
-			DEL = "DELETE",
-			CRT = "CREATE",
-			DRP = "DROP",
-			ALT = "ALTER",
-			TRC = "TRUNCATE",
-		}
-		local verb_name = verb_names[verb] or verb
-		vim.ui.select({ "Execute", "Cancel" }, {
-			prompt = "Execute " .. verb_name .. " query?",
-		}, function(choice)
-			if choice == "Execute" then
-				do_execute()
-			end
-		end)
-	end
+	require("dbab.ui.workbench").run_history_entry(entry)
 end
 
 --- Setup the history window

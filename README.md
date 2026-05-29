@@ -215,6 +215,8 @@ require("dbab").setup({
     open = "<Leader>db",
     execute = "<CR>",
     close = "q",
+    history_picker = "<C-h>",   -- pick a history query and run it
+    toggle_history = "<C-t>",   -- hide/show the history window
     sidebar = {
       toggle_expand = { "<CR>", "o" },
       refresh = "R",

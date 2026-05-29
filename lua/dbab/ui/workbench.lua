@@ -1862,6 +1862,150 @@ function M.open_editor_with_query(query)
 	M.open_editor(query)
 end
 
+--- Run a history entry (load into editor + execute, with confirm for mutations)
+---@param entry Dbab.HistoryEntry|nil
+function M.run_history_entry(entry)
+	if not entry then
+		return
+	end
+
+	local _, verb = query_history.format_summary(entry)
+
+	local function do_execute()
+		M.open_editor_with_query(entry.query)
+		vim.schedule(function()
+			M.execute_query()
+		end)
+	end
+
+	if verb == "SEL" then
+		do_execute()
+	else
+		local verb_names = {
+			INS = "INSERT",
+			UPD = "UPDATE",
+			DEL = "DELETE",
+			CRT = "CREATE",
+			DRP = "DROP",
+			ALT = "ALTER",
+			TRC = "TRUNCATE",
+		}
+		local verb_name = verb_names[verb] or verb
+		vim.ui.select({ "Execute", "Cancel" }, {
+			prompt = "Execute " .. verb_name .. " query?",
+		}, function(choice)
+			if choice == "Execute" then
+				do_execute()
+			end
+		end)
+	end
+end
+
+--- Open the history query picker and run the selected entry
+function M.open_history_picker()
+	vim.cmd("stopinsert")
+	if not M.tab_nr or not vim.api.nvim_tabpage_is_valid(M.tab_nr) then
+		M.open()
+	end
+	require("dbab.ui.picker").open_history(function(entry)
+		if entry then
+			M.run_history_entry(entry)
+		end
+	end)
+end
+
+--- Hide or show the history window
+function M.toggle_history()
+	if not M.tab_nr or not vim.api.nvim_tabpage_is_valid(M.tab_nr) then
+		return
+	end
+
+	-- Hide if currently visible
+	if M.history_win and vim.api.nvim_win_is_valid(M.history_win) then
+		pcall(vim.api.nvim_win_close, M.history_win, false)
+		M.history_win = nil
+		return
+	end
+
+	-- Show: locate history in the configured layout
+	local cfg = config.get()
+	local layout = cfg.layout or DEFAULT_LAYOUT
+	local hist_row_idx, hist_col_idx
+	for ri, row in ipairs(layout) do
+		for ci, comp in ipairs(row) do
+			if comp == "history" then
+				hist_row_idx, hist_col_idx = ri, ci
+			end
+		end
+	end
+
+	if not hist_row_idx then
+		vim.notify("[dbab] History is not part of the current layout", vim.log.levels.WARN)
+		return
+	end
+
+	local row = layout[hist_row_idx]
+	local comp_to_win = {
+		sidebar = M.sidebar_win,
+		editor = M.editor_win,
+		result = M.result_win,
+	}
+
+	-- Split off the sibling: prefer the component before history (open to its
+	-- right), otherwise the component after history (open to its left)
+	local new_win
+	local prev = hist_col_idx > 1 and row[hist_col_idx - 1] or nil
+	if prev and comp_to_win[prev] and vim.api.nvim_win_is_valid(comp_to_win[prev]) then
+		vim.api.nvim_set_current_win(comp_to_win[prev])
+		vim.cmd("belowright vsplit")
+		new_win = vim.api.nvim_get_current_win()
+	else
+		local nxt = row[hist_col_idx + 1]
+		if nxt and comp_to_win[nxt] and vim.api.nvim_win_is_valid(comp_to_win[nxt]) then
+			vim.api.nvim_set_current_win(comp_to_win[nxt])
+			vim.cmd("aboveleft vsplit")
+			new_win = vim.api.nvim_get_current_win()
+		end
+	end
+
+	if not new_win then
+		vim.notify("[dbab] Cannot place history window", vim.log.levels.WARN)
+		return
+	end
+
+	M.history_win = new_win
+	M.history_buf = get_history_ui().get_or_create_buf()
+	get_history_ui().setup(M.history_win)
+
+	local widths = calculate_row_widths(row, vim.o.columns)
+	if widths.history then
+		vim.api.nvim_win_set_width(M.history_win, widths.history)
+	end
+end
+
+--- Attach the global (cross-window) keymaps to a workbench buffer
+---@param buf number
+function M.setup_global_buf_keymaps(buf)
+	if not buf or not vim.api.nvim_buf_is_valid(buf) then
+		return
+	end
+
+	local keymaps = config.get().keymaps
+	local opts = { noremap = true, silent = true, buffer = buf }
+
+	if keymaps.history_picker then
+		vim.keymap.set("n", keymaps.history_picker, function()
+			M.open_history_picker()
+		end, opts)
+	end
+
+	if keymaps.toggle_history then
+		vim.keymap.set("n", keymaps.toggle_history, function()
+			M.toggle_history()
+		end, opts)
+	end
+end
+
 function M.setup_result_keymaps()
 	if not M.result_buf then
 		return
@@ -1900,6 +2044,8 @@ function M.setup_result_keymaps()
 	vim.keymap.set("n", config.get().keymaps.close, function()
 		M.close()
 	end, result_opts)
+
+	M.setup_global_buf_keymaps(M.result_buf)
 end
 
 --- Setup keymaps for a specific editor buffer
@@ -1972,6 +2118,8 @@ function M.setup_editor_keymaps(buf)
 	vim.keymap.set("n", config.get().keymaps.close, function()
 		M.close()
 	end, opts)
+
+	M.setup_global_buf_keymaps(buf)
 end
 
 function M.setup_keymaps()

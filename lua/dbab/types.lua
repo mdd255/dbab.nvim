@@ -64,6 +64,8 @@
 ---@field open string Keymap to open dbab
 ---@field execute string Keymap to execute query (Global)
 ---@field close string Keymap to close dbab (Global)
+---@field history_picker string Keymap to open the history query picker (Global)
+---@field toggle_history string Keymap to hide/show the history window (Global)
 ---@field sidebar Dbab.SidebarKeymaps
 ---@field history Dbab.HistoryKeymaps
 ---@field editor Dbab.EditorKeymaps

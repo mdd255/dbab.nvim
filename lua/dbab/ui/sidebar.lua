@@ -39,6 +39,34 @@ local db_hl_map = {
 	mongodb = "DbabIconMongodb",
 }
 
+--- Connections that failed to connect (shown red)
+---@type table<string, boolean>
+M.error_conns = {}
+
+--- Resolve the highlight group for a connection based on status + db type.
+--- Icon and name share this single color.
+---@param status "loading"|"connected"|"idle"|"error"
+---@param db_type string
+---@return string
+local function conn_status_hl(status, db_type)
+	if status == "error" then
+		return "DbabConnError"
+	elseif status == "loading" then
+		return "DbabConnLoading"
+	elseif status == "idle" then
+		return "DbabConnIdle"
+	end
+	-- connected: color by db type
+	if db_type == "mongodb" then
+		return "DbabConnMongodb"
+	elseif db_type == "postgres" then
+		return "DbabConnPostgres"
+	elseif db_type == "redis" then
+		return "DbabConnRedis"
+	end
+	return "DbabConnDefault"
+end
+
 ---@param depth number
 ---@return string
 local function indent(depth)
@@ -85,13 +113,15 @@ local function render_tree()
 		local conn_text = conn_icon .. conn_label .. conn.name
 		local conn_status
 		if M.is_loading and conn.name == M.loading_conn_name then
-			conn_status = icons.loading .. " loading"
+			conn_status = "loading"
+		elseif M.error_conns[conn.name] then
+			conn_status = "error"
 		elseif is_active or connection.is_connected(conn.name) then
-			conn_status = icons.connected .. " connected"
+			conn_status = "connected"
 		else
-			conn_status = icons.idle .. " idle"
+			conn_status = "idle"
 		end
-		table.insert(lines, pad_right(conn_text, sidebar_width - #conn_status - 1, conn_status))
+		table.insert(lines, conn_text)
 		table.insert(M.nodes, {
 			type = "connection",
 			name = conn.name,
@@ -99,6 +129,8 @@ local function render_tree()
 			depth = 0,
 			---@diagnostic disable-next-line: undefined-field
 			db_type = db_type,
+			---@diagnostic disable-next-line: undefined-field
+			status = conn_status,
 		})
 
 		local conn_url = connection.resolve_url(conn.url)
@@ -417,58 +449,10 @@ function M.apply_highlights()
 		end
 		local text_start = icon_start + icon_len + 1
 
-		local status_start = line:find(icons.connected, 1, true) or line:find(icons.idle, 1, true)
-		local loading_start = line:find(icons.loading, 1, true)
-
 		if node.type == "connection" then
-			local use_brand = config.get().sidebar.use_brand_color
-			local db_hl = use_brand and db_hl_map[node.db_type] or nil
-			local default_hl = "DbabIconDb"
-			local tag_end = line:find("] ", 1, true)
-			local name_start = tag_end and (tag_end + 1) or text_start
-
-			local active_hl = db_hl or default_hl
-			local idle_hl = db_hl or default_hl
-
-			if line:find(icons.connected, 1, true) then
-				vim.api.nvim_buf_add_highlight(M.buf, ns, active_hl, line_num, icon_start, name_start)
-				vim.api.nvim_buf_add_highlight(
-					M.buf,
-					ns,
-					"DbabSidebarText",
-					line_num,
-					name_start,
-					status_start and status_start - 2 or -1
-				)
-				if status_start then
-					vim.api.nvim_buf_add_highlight(
-						M.buf,
-						ns,
-						active_hl,
-						line_num,
-						status_start - 1,
-						status_start + #icons.connected - 1
-					)
-					vim.api.nvim_buf_add_highlight(M.buf, ns, "DbabSidebarType", line_num, status_start + #icons.connected, -1)
-				end
-			elseif loading_start then
-				vim.api.nvim_buf_add_highlight(M.buf, ns, active_hl, line_num, icon_start, name_start)
-				vim.api.nvim_buf_add_highlight(M.buf, ns, "DbabSidebarText", line_num, name_start, loading_start - 2)
-				vim.api.nvim_buf_add_highlight(M.buf, ns, "WarningMsg", line_num, loading_start - 1, -1)
-			elseif line:find(icons.idle, 1, true) then
-				vim.api.nvim_buf_add_highlight(M.buf, ns, idle_hl, line_num, icon_start, name_start)
-				vim.api.nvim_buf_add_highlight(
-					M.buf,
-					ns,
-					"DbabSidebarText",
-					line_num,
-					name_start,
-					status_start and status_start - 2 or -1
-				)
-				if status_start then
-					vim.api.nvim_buf_add_highlight(M.buf, ns, "DbabSidebarType", line_num, status_start - 1, -1)
-				end
-			end
+			-- Icon and name share one color, chosen by connection status + db type
+			local hl = conn_status_hl(node.status, node.db_type)
+			vim.api.nvim_buf_add_highlight(M.buf, ns, hl, line_num, icon_start, -1)
 		elseif node.type == "buffers" or node.type == "saved_queries" then
 			local folder_hl = node.type == "buffers" and "DbabSidebarIconNewQuery" or "DbabSidebarIconColumn"
 			vim.api.nvim_buf_add_highlight(M.buf, ns, folder_hl, line_num, icon_start, icon_start + icon_len)
@@ -546,6 +530,7 @@ function M.toggle_node()
 		if M.expanded[node.name] and node.name ~= connection.get_active_name() then
 			M.is_loading = true
 			M.loading_conn_name = node.name
+			M.error_conns[node.name] = nil
 			connection.set_active(node.name)
 			for _, tab in ipairs(workbench.query_tabs) do
 				if tab.conn_name == "no connection" then
@@ -561,6 +546,7 @@ function M.toggle_node()
 						vim.notify("[dbab] Schema load error: " .. err, vim.log.levels.ERROR)
 						M.is_loading = false
 						M.loading_conn_name = nil
+						M.error_conns[node.name] = true
 						M.refresh()
 						return
 					end
@@ -593,6 +579,7 @@ function M.toggle_node()
 			else
 				M.is_loading = false
 				M.loading_conn_name = nil
+				M.error_conns[node.name] = true
 				M.refresh()
 			end
 			return
@@ -921,6 +908,8 @@ function M.setup_keymaps()
 			vim.api.nvim_set_current_win(workbench.history_win)
 		end
 	end)
+
+	workbench.setup_global_buf_keymaps(M.buf)
 end
 
 function M.cleanup()

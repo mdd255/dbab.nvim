@@ -89,6 +89,14 @@ function M.setup()
 
 		-- Sidebar (DB type icons)
 		DbabIconDb = { link = "Number" },
+		-- Connection status (icon + name share one color)
+		DbabConnIdle = { link = "Comment" }, -- gray: not connected
+		DbabConnError = { link = "ErrorMsg" }, -- red: connection error
+		DbabConnLoading = { link = "WarningMsg" }, -- connecting
+		DbabConnMongodb = { fg = "#47A248", bold = true }, -- green
+		DbabConnPostgres = { fg = "#4169E1", bold = true }, -- blue
+		DbabConnRedis = { fg = "#FF8700", bold = true }, -- orange
+		DbabConnDefault = { link = "Normal" }, -- white: other
 		DbabIconPostgres = { fg = "#4169E1", bold = true },
 		DbabIconMysql = { fg = "#4479A1", bold = true },
 		DbabIconSqlite = { fg = "#003B57", bold = true },

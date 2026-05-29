@@ -63,6 +63,8 @@ M.defaults = {
 		open = "<Leader>db",
 		execute = "<CR>",
 		close = "q",
+		history_picker = "<C-h>",
+		toggle_history = "<C-t>",
 
 		sidebar = {
 			toggle_expand = { "<CR>", "o" },

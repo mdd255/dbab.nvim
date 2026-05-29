@@ -64,6 +64,16 @@ function M.list_connections()
 	vim.notify(table.concat(lines, "\n"), vim.log.levels.INFO)
 end
 
+--- Open the history query picker
+function M.pick_history()
+	M.ui.workbench.open_history_picker()
+end
+
+--- Hide or show the history window
+function M.toggle_history()
+	M.ui.workbench.toggle_history()
+end
+
 --- Close the workbench
 function M.close()
 	M.ui.workbench.close()
