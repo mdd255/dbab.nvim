@@ -148,6 +148,9 @@ M.last_timestamp = nil
 ---@type number|nil
 M.last_result_width = nil
 
+---@type number|nil
+M._placeholder_buf = nil
+
 --- Apply syntax highlighting to SQL query for winbar using treesitter
 ---@param query string
 ---@return string highlighted query with statusline syntax
@@ -684,6 +687,10 @@ function M.create_new_tab(name, content, conn_name, is_saved)
 	if M.editor_win and vim.api.nvim_win_is_valid(M.editor_win) then
 		vim.api.nvim_win_set_buf(M.editor_win, buf)
 		M.editor_buf = buf
+		if M._placeholder_buf and vim.api.nvim_buf_is_valid(M._placeholder_buf) then
+			pcall(vim.api.nvim_buf_delete, M._placeholder_buf, { force = true })
+			M._placeholder_buf = nil
+		end
 	end
 
 	-- Setup keymaps for this buffer
@@ -1722,7 +1729,11 @@ function M._init_all_components(windows)
 	-- Editor
 	if windows.editor then
 		M.editor_win = windows.editor
-		M.create_new_tab(nil, nil, connection.get_active_name(), false)
+		local placeholder = vim.api.nvim_create_buf(false, true)
+		vim.api.nvim_buf_set_option(placeholder, "buftype", "nofile")
+		vim.api.nvim_buf_set_option(placeholder, "modifiable", false)
+		vim.api.nvim_win_set_buf(M.editor_win, placeholder)
+		M._placeholder_buf = placeholder
 	end
 
 	-- Grid (Result)
@@ -2155,6 +2166,9 @@ function M.close()
 			pcall(vim.api.nvim_buf_delete, tab.buf, { force = true })
 		end
 	end
+	if M._placeholder_buf and vim.api.nvim_buf_is_valid(M._placeholder_buf) then
+		pcall(vim.api.nvim_buf_delete, M._placeholder_buf, { force = true })
+	end
 	if M.tab_nr and vim.api.nvim_tabpage_is_valid(M.tab_nr) then
 		vim.cmd("tabclose")
 	end
@@ -2181,6 +2195,7 @@ function M.cleanup()
 	M.result_win = nil
 	M.history_buf = nil
 	M.history_win = nil
+	M._placeholder_buf = nil
 	M.last_result = nil
 	M.last_query = nil
 	M.last_duration = nil
