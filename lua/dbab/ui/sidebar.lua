@@ -901,11 +901,13 @@ function M.setup_keymaps()
 		end)
 	end)
 
-	map(keymaps.to_editor, function()
-		if workbench.editor_win and vim.api.nvim_win_is_valid(workbench.editor_win) then
-			vim.api.nvim_set_current_win(workbench.editor_win)
-		end
-	end)
+	if keymaps.to_editor then
+		map(keymaps.to_editor, function()
+			if workbench.editor_win and vim.api.nvim_win_is_valid(workbench.editor_win) then
+				vim.api.nvim_set_current_win(workbench.editor_win)
+			end
+		end)
+	end
 
 	map(keymaps.to_history, function()
 		if workbench.history_win and vim.api.nvim_win_is_valid(workbench.history_win) then

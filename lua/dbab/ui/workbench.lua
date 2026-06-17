@@ -1303,6 +1303,9 @@ function M.show_result(raw, elapsed)
 		return
 	end
 
+	local notif_handle = M._executing_notif
+	M._executing_notif = nil
+
 	vim.api.nvim_buf_set_option(M.result_buf, "modifiable", true)
 
 	if is_error_result(raw) then
@@ -1322,7 +1325,7 @@ function M.show_result(raw, elapsed)
 			vim.api.nvim_buf_add_highlight(M.result_buf, ns, hl.hl, hl.line, hl.col_start, hl.col_end)
 		end
 
-		vim.notify("[dbab] Query error", vim.log.levels.ERROR)
+		vim.notify("[dbab] Query error", vim.log.levels.ERROR, { replace = notif_handle })
 		return
 	end
 
@@ -1349,7 +1352,7 @@ function M.show_result(raw, elapsed)
 
 		local status_msg = count and string.format(" %s: %d rows (%.1fms) ", verb, count, elapsed)
 			or string.format(" %s successful (%.1fms) ", verb, elapsed)
-		vim.notify(status_msg, vim.log.levels.INFO)
+		vim.notify(status_msg, vim.log.levels.INFO, { replace = notif_handle })
 		return
 	end
 
@@ -1377,7 +1380,7 @@ function M.show_result(raw, elapsed)
 		M.last_result = { columns = {}, rows = {}, row_count = #raw_lines, raw = raw }
 		M.refresh_result_winbar()
 		local status = string.format(" Result: %d lines (%.1fms) ", #raw_lines, elapsed)
-		vim.notify(status, vim.log.levels.INFO)
+		vim.notify(status, vim.log.levels.INFO, { replace = notif_handle })
 		return
 	end
 
@@ -1423,7 +1426,7 @@ function M.show_result(raw, elapsed)
 				M.last_result = { columns = {}, rows = {}, row_count = record_count, raw = table.concat(vert_lines, "\n") }
 				M.refresh_result_winbar()
 				local status = string.format(" Result: %d documents (%.1fms) ", record_count, elapsed)
-				vim.notify(status, vim.log.levels.INFO)
+				vim.notify(status, vim.log.levels.INFO, { replace = notif_handle })
 				return
 			end
 			-- Fall through to jsonc if vertical parse failed
@@ -1438,13 +1441,14 @@ function M.show_result(raw, elapsed)
 		M.last_result = result
 		M.refresh_result_winbar()
 		local status = string.format(" Result (%.1fms) ", elapsed)
-		vim.notify(status, vim.log.levels.INFO)
+		vim.notify(status, vim.log.levels.INFO, { replace = notif_handle })
 		return
 	end
 
 	if result.row_count == 0 then
 		vim.api.nvim_buf_set_lines(M.result_buf, 0, -1, false, { "No results returned" })
 		vim.api.nvim_buf_set_option(M.result_buf, "modifiable", false)
+		vim.notify(string.format(" No results (%.1fms) ", elapsed), vim.log.levels.INFO, { replace = notif_handle })
 		return
 	end
 
@@ -1459,6 +1463,7 @@ function M.show_result(raw, elapsed)
 		vim.api.nvim_buf_set_lines(M.result_buf, 0, -1, false, raw_lines)
 		vim.api.nvim_buf_set_option(M.result_buf, "modifiable", false)
 		M.refresh_result_winbar()
+		vim.notify(string.format(" Result (%.1fms) ", elapsed), vim.log.levels.INFO, { replace = notif_handle })
 		return
 	end
 
@@ -1471,6 +1476,7 @@ function M.show_result(raw, elapsed)
 			vim.api.nvim_buf_set_option(M.result_buf, "filetype", "json")
 		end
 		M.refresh_result_winbar()
+		vim.notify(string.format(" Result (%.1fms) ", elapsed), vim.log.levels.INFO, { replace = notif_handle })
 		return
 	end
 
@@ -1504,6 +1510,7 @@ function M.show_result(raw, elapsed)
 		end
 
 		M.refresh_result_winbar()
+		vim.notify(string.format(" Result (%.1fms) ", elapsed), vim.log.levels.INFO, { replace = notif_handle })
 		return
 	end
 
@@ -1516,6 +1523,7 @@ function M.show_result(raw, elapsed)
 			vim.api.nvim_buf_set_option(M.result_buf, "filetype", "markdown")
 		end
 		M.refresh_result_winbar()
+		vim.notify(string.format(" Result (%.1fms) ", elapsed), vim.log.levels.INFO, { replace = notif_handle })
 		return
 	end
 
@@ -1537,7 +1545,7 @@ function M.show_result(raw, elapsed)
 	M.refresh_result_winbar()
 
 	local status = string.format(" Result: %d rows (%.1fms) ", result.row_count, elapsed)
-	vim.notify(status, vim.log.levels.INFO)
+	vim.notify(status, vim.log.levels.INFO, { replace = notif_handle })
 
 	if M.result_win and vim.api.nvim_win_is_valid(M.result_win) then
 		vim.api.nvim_set_current_win(M.result_win)
@@ -1572,7 +1580,7 @@ function M.execute_query()
 	end
 	M.history_index = 0
 
-	vim.notify("[dbab] Executing query...", vim.log.levels.INFO)
+	M._executing_notif = vim.notify("[dbab] Executing query...", vim.log.levels.INFO, { timeout = false })
 
 	local start_time = vim.loop.hrtime()
 	executor.execute_async(url, query, function(result, err)
@@ -2032,15 +2040,6 @@ function M.setup_result_keymaps()
 	local result_opts = { noremap = true, silent = true, buffer = M.result_buf }
 	local keymaps = config.get().keymaps.result
 
-	-- Tab: To Sidebar/History
-	vim.keymap.set("n", keymaps.to_sidebar, function()
-		if M.history_win and vim.api.nvim_win_is_valid(M.history_win) then
-			vim.api.nvim_set_current_win(M.history_win)
-		elseif M.sidebar_win and vim.api.nvim_win_is_valid(M.sidebar_win) then
-			vim.api.nvim_set_current_win(M.sidebar_win)
-		end
-	end, result_opts)
-
 	-- S-Tab: To Editor
 	vim.keymap.set("n", keymaps.to_editor, function()
 		if M.editor_win and vim.api.nvim_win_is_valid(M.editor_win) then
@@ -2114,15 +2113,6 @@ function M.setup_editor_keymaps(buf)
 	-- Leader+w: Close tab
 	vim.keymap.set("n", keymaps.close_tab, function()
 		M.close_tab()
-	end, opts)
-
-	-- Tab: To Result
-	vim.keymap.set("n", keymaps.to_result, function()
-		if M.result_win and vim.api.nvim_win_is_valid(M.result_win) then
-			vim.api.nvim_set_current_win(M.result_win)
-		elseif M.sidebar_win and vim.api.nvim_win_is_valid(M.sidebar_win) then
-			vim.api.nvim_set_current_win(M.sidebar_win)
-		end
 	end, opts)
 
 	-- S-Tab: To Sidebar

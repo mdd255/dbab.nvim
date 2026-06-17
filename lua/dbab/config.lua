@@ -76,7 +76,6 @@ M.defaults = {
 			delete = "d",
 			copy_query = "c",
 			paste_query = "p",
-			to_editor = "<Tab>",
 			to_history = "<S-Tab>",
 		},
 
@@ -86,7 +85,6 @@ M.defaults = {
 			copy = "y",
 			delete = "d",
 			clear = "C",
-			to_sidebar = "<Tab>",
 			to_result = "<S-Tab>",
 		},
 
@@ -97,14 +95,12 @@ M.defaults = {
 			next_tab = "gt",
 			prev_tab = "gT",
 			close_tab = "<Leader>w",
-			to_result = "<Tab>",
 			to_sidebar = "<S-Tab>",
 		},
 
 		result = {
 			yank_row = "y",
 			yank_all = "Y",
-			to_sidebar = "<Tab>",
 			to_editor = "<S-Tab>",
 		},
 	},

@@ -913,14 +913,6 @@ function M.setup_keymaps(buf)
 		workbench.close()
 	end, opts)
 
-	-- Tab: To Sidebar
-	vim.keymap.set("n", keymaps.to_sidebar, function()
-		local workbench = require("dbab.ui.workbench")
-		if workbench.sidebar_win and vim.api.nvim_win_is_valid(workbench.sidebar_win) then
-			vim.api.nvim_set_current_win(workbench.sidebar_win)
-		end
-	end, opts)
-
 	-- S-Tab: To Result
 	vim.keymap.set("n", keymaps.to_result, function()
 		local workbench = require("dbab.ui.workbench")
