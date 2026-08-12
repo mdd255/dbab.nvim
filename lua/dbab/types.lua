@@ -96,6 +96,7 @@
 ---@class Dbab.EditorKeymaps
 ---@field execute_insert string Execute query in insert mode
 ---@field execute_leader string Execute query with leader
+---@field execute_current string Execute the query block under the cursor (blank-line delimited)
 ---@field save string Save current query
 ---@field next_tab string Next query tab
 ---@field prev_tab string Previous query tab

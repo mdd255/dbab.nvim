@@ -8,8 +8,8 @@ local function adjust_color(hex, amount, blue_tint)
 	if not hex or hex == "" then
 		return nil
 	end
+
 	blue_tint = blue_tint or 0
-	-- Remove # if present
 	hex = hex:gsub("^#", "")
 	local r = tonumber(hex:sub(1, 2), 16)
 	local g = tonumber(hex:sub(3, 4), 16)
@@ -32,11 +32,9 @@ local function get_normal_bg()
 end
 
 function M.setup()
-	-- Calculate zebra colors based on Normal background
 	local normal_bg = get_normal_bg()
-
-	-- Fallback colors if Normal bg is not available
 	local row_odd_bg, row_even_bg
+
 	if normal_bg then
 		row_odd_bg = adjust_color(normal_bg, -10, 15) -- darker + blue tint
 		row_even_bg = adjust_color(normal_bg, 5, 25) -- lighter + more blue tint

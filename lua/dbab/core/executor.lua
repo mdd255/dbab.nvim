@@ -47,6 +47,29 @@ local function merged_env(env)
 	return merged
 end
 
+--- Strip ANSI color codes and Redis array index prefixes ("1) ") from a line.
+---@param line string
+---@return string
+local function strip_redis_line(line)
+	return line:gsub("\27%[[%d;]*m", ""):gsub("^%d+%)%s+", "")
+end
+
+--- Append the query itself to `list` for backends that take it as argv rather
+--- than stdin (mongosh --eval, redis-cli/rdcli tokens).
+---@param list string[]
+---@param db_type string
+---@param query string
+local function append_query_args(list, db_type, query)
+	if db_type == "mongodb" then
+		table.insert(list, "--eval")
+		table.insert(list, query)
+	elseif db_type == "redis" then
+		for _, token in ipairs(M._split_redis_args(query)) do
+			table.insert(list, token)
+		end
+	end
+end
+
 -- ============================================
 -- CLI backend
 -- ============================================
@@ -63,38 +86,26 @@ local function cli_execute(url, query)
 		table.insert(cmd_list, arg)
 	end
 
-	-- MongoDB: pass query via --eval to avoid REPL prompt noise
-	if connection.parse_type(url) == "mongodb" then
-		table.insert(cmd_list, "--eval")
-		table.insert(cmd_list, query)
+	local db_type = connection.parse_type(url)
+
+	if db_type == "mongodb" or db_type == "redis" then
+		append_query_args(cmd_list, db_type, query)
+
 		local lines = with_env(env, function()
 			return vim.fn.systemlist(cmd_list)
 		end)
-		if vim.v.shell_error ~= 0 then
+
+		if db_type == "mongodb" and vim.v.shell_error ~= 0 then
 			vim.notify(
 				"[dbab] mongosh error (exit " .. vim.v.shell_error .. "): " .. table.concat(lines, " "),
 				vim.log.levels.WARN
 			)
+		elseif db_type == "redis" then
+			for i, line in ipairs(lines) do
+				lines[i] = strip_redis_line(line)
+			end
 		end
-		return table.concat(lines, "\n")
-	end
 
-	-- Redis: pass command as arguments (redis-cli / rdcli don't read from stdin reliably)
-	if connection.parse_type(url) == "redis" then
-		-- Split query into words, respecting quoted strings
-		for _, token in ipairs(M._split_redis_args(query)) do
-			table.insert(cmd_list, token)
-		end
-		local lines = with_env(env, function()
-			return vim.fn.systemlist(cmd_list)
-		end)
-		for i, line in ipairs(lines) do
-			-- Strip ANSI color codes (rdcli outputs colored text)
-			line = line:gsub("\27%[[%d;]*m", "")
-			-- Strip Redis array index prefix: "1) " -> ""
-			line = line:gsub("^%d+%)%s+", "")
-			lines[i] = line
-		end
 		return table.concat(lines, "\n")
 	end
 
@@ -102,56 +113,43 @@ local function cli_execute(url, query)
 	local lines = with_env(env, function()
 		return vim.fn.systemlist(cmd_list, query)
 	end)
+
 	return table.concat(lines, "\n")
 end
 
+--- Fallback for when plenary isn't installed: run the sync executor and report via callback.
+---@param sync_fn fun(url: string, query: string): string
 ---@param url string
 ---@param query string
 ---@param callback fun(result: string, err: string|nil)
-local function cli_execute_async(url, query, callback)
-	if not has_plenary then
-		vim.schedule(function()
-			local ok, result = pcall(cli_execute, url, query)
-			if ok then
-				callback(result, nil)
-			else
-				callback("", tostring(result))
-			end
-		end)
-		return
-	end
-
-	local adapter = require("dbab.core.adapter")
-	local command, args, env = adapter.build_cmd(url)
-
-	-- MongoDB: pass query via --eval to avoid REPL prompt noise
-	local db_type = connection.parse_type(url)
-	local is_mongodb = db_type == "mongodb"
-	local is_redis = db_type == "redis"
-	if is_mongodb then
-		table.insert(args, "--eval")
-		table.insert(args, query)
-	elseif is_redis then
-		for _, token in ipairs(M._split_redis_args(query)) do
-			table.insert(args, token)
+local function run_sync_as_async(sync_fn, url, query, callback)
+	vim.schedule(function()
+		local ok, result = pcall(sync_fn, url, query)
+		if ok then
+			callback(result, nil)
+		else
+			callback("", tostring(result))
 		end
-	end
+	end)
+end
 
+--- Run `command args` as a plenary Job, collecting stdout/stderr and invoking
+--- `opts.callback(result, err)` on exit.
+---@param command string
+---@param args string[]
+---@param opts { writer?: string, env?: table, filter_line?: fun(string): string, callback: fun(string, string|nil) }
+local function run_job(command, args, opts)
 	local stdout_results = {}
 	local stderr_results = {}
 
-	local job_opts = {
+	Job:new({
 		command = command,
 		args = args,
+		writer = opts.writer,
+		env = opts.env,
 		on_stdout = function(_, data)
 			if data then
-				if is_redis then
-					-- Strip ANSI color codes (rdcli outputs colored text)
-					data = data:gsub("\27%[[%d;]*m", "")
-					-- Strip Redis array index prefix: "1) " -> ""
-					data = data:gsub("^%d+%)%s+", "")
-				end
-				table.insert(stdout_results, data)
+				table.insert(stdout_results, opts.filter_line and opts.filter_line(data) or data)
 			end
 		end,
 		on_stderr = function(_, data)
@@ -163,20 +161,38 @@ local function cli_execute_async(url, query, callback)
 			vim.schedule(function()
 				local result = table.concat(stdout_results, "\n")
 				local err = #stderr_results > 0 and table.concat(stderr_results, "\n") or nil
-
 				if return_val ~= 0 and err then
-					callback("", err)
+					opts.callback("", err)
 				else
-					callback(result, nil)
+					opts.callback(result, nil)
 				end
 			end)
 		end,
-	}
-	if not is_mongodb and not is_redis then
-		job_opts.writer = query
+	}):start()
+end
+
+---@param url string
+---@param query string
+---@param callback fun(result: string, err: string|nil)
+local function cli_execute_async(url, query, callback)
+	if not has_plenary then
+		return run_sync_as_async(cli_execute, url, query, callback)
 	end
-	job_opts.env = merged_env(env)
-	Job:new(job_opts):start()
+
+	local adapter = require("dbab.core.adapter")
+	local command, args, env = adapter.build_cmd(url)
+	local db_type = connection.parse_type(url)
+	local is_redis = db_type == "redis"
+
+	append_query_args(args, db_type, query)
+
+	run_job(command, args, {
+		-- mongo/redis already carry the query in argv; everything else uses stdin
+		writer = (db_type ~= "mongodb" and not is_redis) and query or nil,
+		env = merged_env(env),
+		filter_line = is_redis and strip_redis_line or nil,
+		callback = callback,
+	})
 end
 
 -- ============================================
@@ -189,23 +205,18 @@ end
 local function dadbod_get_cmd(url)
 	local ok, cmd = pcall(vim.fn["db#adapter#dispatch"], url, "interactive")
 
-	if ok and cmd and url:match("^mariadb://") then
-		local is_mariadb = false
-		if type(cmd) == "string" and cmd:match("^mariadb") then
-			is_mariadb = true
-		end
-		if type(cmd) == "table" and cmd[1] == "mariadb" then
-			is_mariadb = true
-		end
+	if url:match("^mariadb://") then
+		local dispatched_mariadb = ok
+			and cmd
+			and ((type(cmd) == "string" and cmd:match("^mariadb")) or (type(cmd) == "table" and cmd[1] == "mariadb"))
 
-		if is_mariadb and vim.fn.executable("mariadb") == 0 and vim.fn.executable("mysql") == 1 then
-			local fallback_url = url:gsub("^mariadb://", "mysql://")
-			ok, cmd = pcall(vim.fn["db#adapter#dispatch"], fallback_url, "interactive")
-		end
-	end
-
-	if (not ok or not cmd) and url:match("^mariadb://") then
-		if vim.fn.executable("mariadb") == 0 and vim.fn.executable("mysql") == 1 then
+		-- vim-dadbod's mariadb adapter shells out to the `mariadb` binary; fall
+		-- back to `mysql` (wire-compatible) when it's missing.
+		if
+			(dispatched_mariadb or not ok or not cmd)
+			and vim.fn.executable("mariadb") == 0
+			and vim.fn.executable("mysql") == 1
+		then
 			local fallback_url = url:gsub("^mariadb://", "mysql://")
 			ok, cmd = pcall(vim.fn["db#adapter#dispatch"], fallback_url, "interactive")
 		end
@@ -228,15 +239,7 @@ end
 ---@param callback fun(result: string, err: string|nil)
 local function dadbod_execute_async(url, query, callback)
 	if not has_plenary then
-		vim.schedule(function()
-			local ok, result = pcall(dadbod_execute, url, query)
-			if ok then
-				callback(result, nil)
-			else
-				callback("", tostring(result))
-			end
-		end)
-		return
+		return run_sync_as_async(dadbod_execute, url, query, callback)
 	end
 
 	local cmd, ok = dadbod_get_cmd(url)
@@ -262,50 +265,37 @@ local function dadbod_execute_async(url, query, callback)
 		return
 	end
 
-	local stdout_results = {}
-	local stderr_results = {}
-
-	Job:new({
-		command = command,
-		args = args,
-		writer = query,
-		on_stdout = function(_, data)
-			if data then
-				table.insert(stdout_results, data)
-			end
-		end,
-		on_stderr = function(_, data)
-			if data then
-				table.insert(stderr_results, data)
-			end
-		end,
-		on_exit = function(_, return_val)
-			vim.schedule(function()
-				local result = table.concat(stdout_results, "\n")
-				local err = #stderr_results > 0 and table.concat(stderr_results, "\n") or nil
-
-				if return_val ~= 0 and err then
-					callback("", err)
-				else
-					callback(result, nil)
-				end
-			end)
-		end,
-	}):start()
+	run_job(command, args, { writer = query, callback = callback })
 end
 
 -- ============================================
 -- Public API
 -- ============================================
 
+--- MongoDB shell queries must be prefixed with `db.` (e.g. `db.users.find()`).
+--- Auto-prepend it when missing so users can type `users.find()` instead.
+---@param url string
+---@param query string
+---@return string
+local function normalize_query(url, query)
+	if connection.parse_type(url) == "mongodb" and not query:match("^%s*db%.") then
+		return "db." .. query
+	end
+
+	return query
+end
+
 ---@param url string DB connection URL
 ---@param query string SQL query
 ---@return string result
 function M.execute(url, query)
+	query = normalize_query(url, query)
+
 	local ok, result = pcall(function()
 		if use_dadbod() then
 			return dadbod_execute(url, query)
 		end
+
 		return cli_execute(url, query)
 	end)
 
@@ -321,10 +311,12 @@ end
 ---@return string result
 function M.execute_active(query)
 	local url = connection.get_active_url()
+
 	if not url then
 		vim.notify("[dbab] No active connection. Use :Dbab connect first.", vim.log.levels.WARN)
 		return ""
 	end
+
 	return M.execute(url, query)
 end
 
@@ -332,6 +324,8 @@ end
 ---@param query string
 ---@param callback fun(result: string, err: string|nil)
 function M.execute_async(url, query, callback)
+	query = normalize_query(url, query)
+
 	if use_dadbod() then
 		dadbod_execute_async(url, query, callback)
 	else
@@ -343,12 +337,14 @@ end
 ---@param callback fun(result: string, err: string|nil)
 function M.execute_active_async(query, callback)
 	local url = connection.get_active_url()
+
 	if not url then
 		vim.schedule(function()
 			callback("", "No active connection")
 		end)
 		return
 	end
+
 	M.execute_async(url, query, callback)
 end
 
@@ -360,34 +356,40 @@ function M._split_redis_args(query)
 	local args = {}
 	local i = 1
 	local len = #query
+
 	while i <= len do
-		-- Skip whitespace
 		while i <= len and query:sub(i, i):match("%s") do
 			i = i + 1
 		end
+
 		if i > len then
 			break
 		end
+
 		local ch = query:sub(i, i)
+
 		if ch == '"' or ch == "'" then
-			-- Quoted string
 			local quote = ch
 			i = i + 1
 			local start = i
+
 			while i <= len and query:sub(i, i) ~= quote do
 				i = i + 1
 			end
+
 			table.insert(args, query:sub(start, i - 1))
 			i = i + 1 -- skip closing quote
 		else
-			-- Unquoted token
 			local start = i
+
 			while i <= len and not query:sub(i, i):match("%s") do
 				i = i + 1
 			end
+
 			table.insert(args, query:sub(start, i - 1))
 		end
 	end
+
 	return args
 end
 

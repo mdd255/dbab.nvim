@@ -137,6 +137,7 @@ function source:get_completions(_, callback)
 
 	local context_url = get_context_url()
 	local tables = cache.get_table_names_cached(context_url)
+
 	for _, tbl in ipairs(tables) do
 		if not seen[tbl] then
 			seen[tbl] = true
@@ -150,13 +151,16 @@ function source:get_completions(_, callback)
 	end
 
 	local columns = cache.get_all_columns_cached(context_url)
+
 	for _, col in ipairs(columns) do
 		if not seen[col.name] then
 			seen[col.name] = true
 			local detail = col.data_type or "Column"
+
 			if col.is_primary then
 				detail = detail .. " (PK)"
 			end
+
 			table.insert(items, {
 				label = col.name,
 				kind = k.Field,

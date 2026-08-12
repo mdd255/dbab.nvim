@@ -17,6 +17,8 @@ local function get_history_ui()
 	return require("dbab.ui.history")
 end
 
+local RESULT_NS = vim.api.nvim_create_namespace("dbab_result")
+
 -- Default layout for fallback
 local DEFAULT_LAYOUT = {
 	{ "sidebar", "editor" },
@@ -160,7 +162,6 @@ local function highlight_sql_winbar(query)
 		return str:gsub("%%", "%%%%")
 	end
 
-	-- Try to use treesitter for accurate highlighting
 	local ok, ts_parser = pcall(vim.treesitter.get_string_parser, query, "sql")
 	if not ok or not ts_parser then
 		return escape_percent(query)
@@ -173,34 +174,29 @@ local function highlight_sql_winbar(query)
 
 	local root = tree:root()
 
-	-- Get highlights query for SQL
 	local hl_query_ok, hl_query = pcall(vim.treesitter.query.get, "sql", "highlights")
 	if not hl_query_ok or not hl_query then
 		return escape_percent(query)
 	end
 
-	-- Collect highlights: {start_col, end_col, hl_group}
+	-- {start_col, end_col, hl_group}, single-line captures only (row 0)
 	local highlights = {}
-
-	-- Iterate through captures
 	for id, node in hl_query:iter_captures(root, query, 0, 1) do
 		local name = hl_query.captures[id]
 		local start_row, start_col, end_row, end_col = node:range()
 
-		-- Only handle single-line (row 0)
 		if start_row == 0 and end_row == 0 then
-			-- Use treesitter highlight group directly (e.g., @keyword.sql)
 			local hl_group = "@" .. name .. ".sql"
 			table.insert(highlights, { start_col = start_col, end_col = end_col, hl = hl_group })
 		end
 	end
 
-	-- Sort by start position
 	table.sort(highlights, function(a, b)
 		return a.start_col < b.start_col
 	end)
 
-	-- Remove overlapping highlights (keep the first one)
+	-- Drop overlapping captures, keeping the first (treesitter can emit
+	-- multiple overlapping captures for the same span)
 	local filtered = {}
 	local last_end = -1
 	for _, hl in ipairs(highlights) do
@@ -210,25 +206,21 @@ local function highlight_sql_winbar(query)
 		end
 	end
 
-	-- Build highlighted string
 	local result = ""
 	local pos = 0
 	for _, hl in ipairs(filtered) do
-		-- Skip if highlight starts before current position (shouldn't happen after filtering)
 		if hl.start_col < pos then
 			goto continue
 		end
-		-- Add unhighlighted text before this highlight
 		if hl.start_col > pos then
 			result = result .. escape_percent(query:sub(pos + 1, hl.start_col))
 		end
-		-- Add highlighted text (single % for winbar highlight syntax)
+		-- %#hl#...%* is winbar highlight syntax; needs a single % (not escaped)
 		local text = query:sub(hl.start_col + 1, hl.end_col)
 		result = result .. "%#" .. hl.hl .. "#" .. escape_percent(text) .. "%*"
 		pos = hl.end_col
 		::continue::
 	end
-	-- Add remaining text
 	if pos < #query then
 		result = result .. escape_percent(query:sub(pos + 1))
 	end
@@ -245,6 +237,24 @@ local function get_textoff(win)
 		return wininfo[1].textoff or 0
 	end
 	return 0
+end
+
+--- Truncate a string to fit max_width display columns (multibyte-aware).
+---@param str string
+---@param max_width number
+---@return string truncated, number width
+local function truncate_display(str, max_width)
+	local truncated, len = "", 0
+	for i = 0, vim.fn.strchars(str) - 1 do
+		local char = vim.fn.strcharpart(str, i, 1)
+		local char_width = vim.fn.strdisplaywidth(char)
+		if len + char_width + 1 > max_width then
+			break
+		end
+		truncated = truncated .. char
+		len = len + char_width
+	end
+	return truncated, len
 end
 
 --- Format duration for display
@@ -271,7 +281,6 @@ function M.refresh_result_winbar()
 
 	local cfg = config.get()
 
-	-- Get actual text offset (includes line numbers, signs, etc.)
 	local textoff = get_textoff(M.result_win)
 	local indent = string.rep(" ", textoff)
 
@@ -340,35 +349,14 @@ function M.refresh_result_winbar()
 			-- Not enough space: just show metadata aligned to window right
 			local highlighted = highlight_sql_winbar(query)
 			if query_len > 30 then
-				-- Truncate to 30 chars
-				local truncated = ""
-				local len = 0
-				for char_idx = 0, vim.fn.strchars(query) - 1 do
-					local char = vim.fn.strcharpart(query, char_idx, 1)
-					local char_width = vim.fn.strdisplaywidth(char)
-					if len + char_width + 1 > 30 then
-						break
-					end
-					truncated = truncated .. char
-					len = len + char_width
-				end
+				local truncated = truncate_display(query, 30)
 				highlighted = highlight_sql_winbar(truncated .. "…")
 			end
 			winbar_text = prefix .. highlighted .. "%=" .. table.concat(suffix_parts, "  ")
 		else
 			-- Enough space: align suffix to grid edge
 			if query_len > query_space then
-				local truncated = ""
-				local len = 0
-				for char_idx = 0, vim.fn.strchars(query) - 1 do
-					local char = vim.fn.strcharpart(query, char_idx, 1)
-					local char_width = vim.fn.strdisplaywidth(char)
-					if len + char_width + 1 > query_space then
-						break
-					end
-					truncated = truncated .. char
-					len = len + char_width
-				end
+				local truncated = truncate_display(query, query_space)
 				query = truncated .. "…"
 				query_len = vim.fn.strdisplaywidth(query)
 			end
@@ -409,20 +397,7 @@ local function truncate_name(name, max_width)
 	if display_len <= max_width then
 		return name, display_len
 	end
-
-	-- Truncate with ellipsis
-	local chars = vim.fn.strchars(name)
-	local truncated = ""
-	local len = 0
-	for i = 0, chars - 1 do
-		local char = vim.fn.strcharpart(name, i, 1)
-		local char_width = vim.fn.strdisplaywidth(char)
-		if len + char_width + 1 > max_width then
-			break
-		end
-		truncated = truncated .. char
-		len = len + char_width
-	end
+	local truncated, len = truncate_display(name, max_width)
 	return truncated .. "…", len + 1
 end
 
@@ -442,7 +417,6 @@ local function render_tabbar()
 		local icon = icons.db(db_type) .. " "
 		local is_active = i == M.active_tab
 
-		-- Truncate name if needed
 		local max_name_width = TAB_TOTAL_WIDTH - ICON_WIDTH - (TAB_PADDING * 2)
 		local name, _ = truncate_name(tab.name, max_name_width)
 
@@ -523,14 +497,12 @@ function M.switch_tab(index)
 	M.active_tab = index
 	local tab = M.query_tabs[index]
 
-	-- Update editor buffer
 	if M.editor_win and vim.api.nvim_win_is_valid(M.editor_win) then
 		vim.api.nvim_win_set_buf(M.editor_win, tab.buf)
 		M.editor_buf = tab.buf
 	end
 
-	-- Update buffer name
-	local conn_name = tab.conn_name or connection.get_active_name() or ""
+	local conn_name = tab.conn_name or connection.get_active_name() or ""
 	local display_name = tab.is_saved and tab.name or ("*" .. tab.name)
 	pcall(vim.api.nvim_buf_set_name, tab.buf, conn_name .. "." .. display_name)
 
@@ -607,7 +579,6 @@ function M._do_close_tab(target)
 
 	local old_buf = target.buf
 
-	-- Remove from list first
 	table.remove(M.query_tabs, idx)
 
 	if #M.query_tabs == 0 then
@@ -639,7 +610,6 @@ function M.create_new_tab(name, content, conn_name, is_saved)
 	local buf = vim.api.nvim_create_buf(false, true)
 	local conn = conn_name or connection.get_active_name() or "no connection"
 
-	-- Generate unique name for new queries
 	local tab_name = name
 	if not tab_name then
 		local conn_prefix = conn:gsub("[^%w]", "-")
@@ -664,7 +634,6 @@ function M.create_new_tab(name, content, conn_name, is_saved)
 	table.insert(M.query_tabs, tab)
 	M.active_tab = #M.query_tabs
 
-	-- Setup buffer
 	local resolved_url = connection.get_active_url()
 	local db_type = resolved_url and connection.parse_type(resolved_url) or "unknown"
 	local ft = db_type == "mongodb" and "javascript" or db_type == "redis" and "redis" or "sql"
@@ -675,7 +644,6 @@ function M.create_new_tab(name, content, conn_name, is_saved)
 	local display_name = is_saved and tab_name or (tab_name .. "*")
 	pcall(vim.api.nvim_buf_set_name, buf, "[" .. conn .. "] " .. display_name)
 
-	-- Set content
 	local lines = content and vim.split(content, "\n") or { "" }
 	vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
 
@@ -692,10 +660,8 @@ function M.create_new_tab(name, content, conn_name, is_saved)
 		end,
 	})
 
-	-- Track modifications
 	vim.api.nvim_buf_attach(buf, false, {
 		on_lines = function()
-			-- Find this tab and mark as modified
 			for _, t in ipairs(M.query_tabs) do
 				if t.buf == buf and not t.modified then
 					t.modified = true
@@ -706,7 +672,6 @@ function M.create_new_tab(name, content, conn_name, is_saved)
 		end,
 	})
 
-	-- Show in editor window
 	if M.editor_win and vim.api.nvim_win_is_valid(M.editor_win) then
 		vim.api.nvim_win_set_buf(M.editor_win, buf)
 		M.editor_buf = buf
@@ -716,7 +681,6 @@ function M.create_new_tab(name, content, conn_name, is_saved)
 		end
 	end
 
-	-- Setup keymaps for this buffer
 	M.setup_editor_keymaps(buf)
 
 	M.refresh_tabbar()
@@ -790,20 +754,19 @@ end
 ---@param widths number[]
 ---@param has_header boolean
 local function apply_highlights(bufnr, result, widths, has_header)
-	local ns = vim.api.nvim_create_namespace("dbab_result")
-	vim.api.nvim_buf_clear_namespace(bufnr, ns, 0, -1)
+	vim.api.nvim_buf_clear_namespace(bufnr, RESULT_NS, 0, -1)
 
 	local header_offset = has_header and 1 or 0
 	local total_lines = #result.rows + header_offset
 
 	if has_header then
-		vim.api.nvim_buf_add_highlight(bufnr, ns, "DbabHeader", 0, 0, -1)
+		vim.api.nvim_buf_add_highlight(bufnr, RESULT_NS, "DbabHeader", 0, 0, -1)
 	end
 
 	for line_num = header_offset, total_lines - 1 do
 		local row_idx = line_num - header_offset + 1
 		local row_hl = row_idx % 2 == 1 and "DbabRowOdd" or "DbabRowEven"
-		vim.api.nvim_buf_add_highlight(bufnr, ns, row_hl, line_num, 0, -1)
+		vim.api.nvim_buf_add_highlight(bufnr, RESULT_NS, row_hl, line_num, 0, -1)
 	end
 
 	for row_idx, row in ipairs(result.rows) do
@@ -816,7 +779,7 @@ local function apply_highlights(bufnr, result, widths, has_header)
 			local display = cell == "" and "NULL" or cell
 			local hl_group = detect_cell_hl(cell)
 
-			vim.api.nvim_buf_add_highlight(bufnr, ns, hl_group, line_num, cell_start, cell_start + #display)
+			vim.api.nvim_buf_add_highlight(bufnr, RESULT_NS, hl_group, line_num, cell_start, cell_start + #display)
 
 			col_start = col_start + w + 2
 		end
@@ -843,7 +806,6 @@ local function format_error(raw)
 	table.insert(highlights, { line = 1, hl = "ErrorMsg", col_start = 0, col_end = -1 })
 	table.insert(lines, "")
 
-	-- Split raw into lines for parsing
 	local raw_lines = vim.split(raw, "\n")
 	local found_content = false
 
@@ -994,7 +956,6 @@ function M.save_query_by_buf(buf, callback)
 		return
 	end
 
-	-- Get content
 	if not (tab.buf and vim.api.nvim_buf_is_valid(tab.buf)) then
 		vim.notify("[dbab] Query buffer no longer valid", vim.log.levels.WARN)
 		if callback then
@@ -1025,7 +986,6 @@ function M.save_query_by_buf(buf, callback)
 		end
 	end
 
-	-- If already saved, just save with same name
 	if tab.is_saved then
 		do_save(tab.name)
 	else
@@ -1036,7 +996,6 @@ function M.save_query_by_buf(buf, callback)
 				default = "",
 			}, function(input)
 				if input and input ~= "" then
-					-- Check if already exists
 					if storage.query_exists(conn_name, input) then
 						vim.ui.select({ "Overwrite", "Cancel" }, {
 							prompt = "Query '" .. input .. "' already exists",
@@ -1085,11 +1044,9 @@ function M.open_saved_query(query_name, content, conn_name)
 		M.open()
 	end
 
-	-- Check if already open
 	for i, tab in ipairs(M.query_tabs) do
 		if tab.name == query_name and tab.conn_name == conn_name and tab.is_saved then
 			M.switch_tab(i)
-			-- Focus editor
 			if M.editor_win and vim.api.nvim_win_is_valid(M.editor_win) then
 				vim.api.nvim_set_current_win(M.editor_win)
 			end
@@ -1097,19 +1054,13 @@ function M.open_saved_query(query_name, content, conn_name)
 		end
 	end
 
-	-- Create new tab
 	M.create_new_tab(query_name, content, conn_name, true)
 
-	-- Focus editor
 	if M.editor_win and vim.api.nvim_win_is_valid(M.editor_win) then
 		vim.api.nvim_set_current_win(M.editor_win)
 	end
 end
 
---- Parse mongosh JSON output into vertical RECORD format.
---- Uses indentation-based heuristics since mongosh output is consistently formatted.
----@param raw_lines string[]
----@return string[]|nil lines, number record_count
 local function collapse_to_single_line(parts)
 	local pieces = {}
 	for _, p in ipairs(parts) do
@@ -1160,6 +1111,10 @@ local function collapse_array_objects(parts)
 	return result
 end
 
+--- Parse mongosh JSON output into vertical RECORD format.
+--- Uses indentation-based heuristics since mongosh output is consistently formatted.
+---@param raw_lines string[]
+---@return string[]|nil lines, number record_count
 local function parse_mongodb_vertical(raw_lines)
 	-- Determine the indentation level of top-level document fields
 	local field_indent = nil
@@ -1296,6 +1251,50 @@ local function parse_mongodb_vertical(raw_lines)
 	return vert_lines, record_num
 end
 
+--- Highlight a "-[ RECORD n ]-" / "key | value" vertical result rendering.
+---@param bufnr number
+---@param lines string[]
+local function apply_vertical_highlights(bufnr, lines)
+	vim.api.nvim_buf_clear_namespace(bufnr, RESULT_NS, 0, -1)
+	for i, line in ipairs(lines) do
+		local ln = i - 1
+		if line:match("^%-%[ RECORD %d+") then
+			vim.api.nvim_buf_add_highlight(bufnr, RESULT_NS, "DbabHeader", ln, 0, -1)
+		else
+			local sep = line:find(" | ")
+			if sep then
+				local col_name = vim.trim(line:sub(1, sep - 1))
+				local col_start = line:find(col_name, 1, true)
+				vim.api.nvim_buf_add_highlight(bufnr, RESULT_NS, "DbabKey", ln, col_start - 1, col_start - 1 + #col_name)
+				vim.api.nvim_buf_add_highlight(bufnr, RESULT_NS, "DbabBorder", ln, sep - 1, sep + 2)
+				local value = vim.trim(line:sub(sep + 3))
+				local value_start = sep + 2
+				local hl_group = detect_cell_hl(value)
+				vim.api.nvim_buf_add_highlight(bufnr, RESULT_NS, hl_group, ln, value_start, value_start + #value)
+			end
+		end
+	end
+end
+
+--- Replace result buffer content, disable line numbers, and apply flat
+--- {line, hl, col_start, col_end} highlights (used for error/mutation views).
+---@param lines string[]
+---@param highlights table[]
+local function set_result_lines(lines, highlights)
+	vim.api.nvim_buf_set_lines(M.result_buf, 0, -1, false, lines)
+	vim.api.nvim_buf_set_option(M.result_buf, "modifiable", false)
+
+	if M.result_win and vim.api.nvim_win_is_valid(M.result_win) then
+		vim.api.nvim_win_set_option(M.result_win, "number", false)
+		vim.api.nvim_win_set_option(M.result_win, "relativenumber", false)
+	end
+
+	vim.api.nvim_buf_clear_namespace(M.result_buf, RESULT_NS, 0, -1)
+	for _, hl in ipairs(highlights) do
+		vim.api.nvim_buf_add_highlight(M.result_buf, RESULT_NS, hl.hl, hl.line, hl.col_start, hl.col_end)
+	end
+end
+
 ---@param raw string
 ---@param elapsed number
 function M.show_result(raw, elapsed)
@@ -1309,44 +1308,14 @@ function M.show_result(raw, elapsed)
 	vim.api.nvim_buf_set_option(M.result_buf, "modifiable", true)
 
 	if is_error_result(raw) then
-		local lines, highlights = format_error(raw)
-
-		vim.api.nvim_buf_set_lines(M.result_buf, 0, -1, false, lines)
-		vim.api.nvim_buf_set_option(M.result_buf, "modifiable", false)
-
-		if M.result_win and vim.api.nvim_win_is_valid(M.result_win) then
-			vim.api.nvim_win_set_option(M.result_win, "number", false)
-			vim.api.nvim_win_set_option(M.result_win, "relativenumber", false)
-		end
-
-		local ns = vim.api.nvim_create_namespace("dbab_result")
-		vim.api.nvim_buf_clear_namespace(M.result_buf, ns, 0, -1)
-		for _, hl in ipairs(highlights) do
-			vim.api.nvim_buf_add_highlight(M.result_buf, ns, hl.hl, hl.line, hl.col_start, hl.col_end)
-		end
-
+		set_result_lines(format_error(raw))
 		vim.notify("[dbab] Query error", vim.log.levels.ERROR, { replace = notif_handle })
 		return
 	end
 
 	local is_mutation, verb, count = parse_mutation_result(raw)
 	if is_mutation and verb then
-		local lines, highlights = format_mutation_result(verb, count)
-
-		vim.api.nvim_buf_set_lines(M.result_buf, 0, -1, false, lines)
-		vim.api.nvim_buf_set_option(M.result_buf, "modifiable", false)
-
-		if M.result_win and vim.api.nvim_win_is_valid(M.result_win) then
-			vim.api.nvim_win_set_option(M.result_win, "number", false)
-			vim.api.nvim_win_set_option(M.result_win, "relativenumber", false)
-		end
-
-		local ns = vim.api.nvim_create_namespace("dbab_result")
-		vim.api.nvim_buf_clear_namespace(M.result_buf, ns, 0, -1)
-		for _, hl in ipairs(highlights) do
-			vim.api.nvim_buf_add_highlight(M.result_buf, ns, hl.hl, hl.line, hl.col_start, hl.col_end)
-		end
-
+		set_result_lines(format_mutation_result(verb, count))
 		M.last_result = { columns = {}, rows = {}, row_count = count or 0, raw = raw }
 		M.refresh_result_winbar()
 
@@ -1401,27 +1370,7 @@ function M.show_result(raw, elapsed)
 			if vert_lines and #vert_lines > 0 then
 				vim.api.nvim_buf_set_lines(M.result_buf, 0, -1, false, vert_lines)
 				vim.api.nvim_buf_set_option(M.result_buf, "modifiable", false)
-
-				local ns = vim.api.nvim_create_namespace("dbab_result")
-				vim.api.nvim_buf_clear_namespace(M.result_buf, ns, 0, -1)
-				for i, line in ipairs(vert_lines) do
-					local ln = i - 1
-					if line:match("^%-%[ RECORD %d+") then
-						vim.api.nvim_buf_add_highlight(M.result_buf, ns, "DbabHeader", ln, 0, -1)
-					else
-						local sep = line:find(" | ")
-						if sep then
-							local col_name = vim.trim(line:sub(1, sep - 1))
-							local col_start = line:find(col_name, 1, true)
-							vim.api.nvim_buf_add_highlight(M.result_buf, ns, "DbabKey", ln, col_start - 1, col_start - 1 + #col_name)
-							vim.api.nvim_buf_add_highlight(M.result_buf, ns, "DbabBorder", ln, sep - 1, sep + 2)
-							local value = vim.trim(line:sub(sep + 3))
-							local value_start = sep + 2
-							local hl_group = detect_cell_hl(value)
-							vim.api.nvim_buf_add_highlight(M.result_buf, ns, hl_group, ln, value_start, value_start + #value)
-						end
-					end
-				end
+				apply_vertical_highlights(M.result_buf, vert_lines)
 
 				M.last_result = { columns = {}, rows = {}, row_count = record_count, raw = table.concat(vert_lines, "\n") }
 				M.refresh_result_winbar()
@@ -1484,30 +1433,7 @@ function M.show_result(raw, elapsed)
 		local vert_lines = vim.split(result.raw, "\n")
 		vim.api.nvim_buf_set_lines(M.result_buf, 0, -1, false, vert_lines)
 		vim.api.nvim_buf_set_option(M.result_buf, "modifiable", false)
-
-		local ns = vim.api.nvim_create_namespace("dbab_result")
-		vim.api.nvim_buf_clear_namespace(M.result_buf, ns, 0, -1)
-
-		for i, line in ipairs(vert_lines) do
-			local ln = i - 1
-			if line:match("^%-%[ RECORD %d+") then
-				vim.api.nvim_buf_add_highlight(M.result_buf, ns, "DbabHeader", ln, 0, -1)
-			else
-				local sep = line:find(" | ")
-				if sep then
-					local col_name = vim.trim(line:sub(1, sep - 1))
-					local col_start = line:find(col_name, 1, true)
-					vim.api.nvim_buf_add_highlight(M.result_buf, ns, "DbabKey", ln, col_start - 1, col_start - 1 + #col_name)
-
-					vim.api.nvim_buf_add_highlight(M.result_buf, ns, "DbabBorder", ln, sep - 1, sep + 2)
-
-					local value = vim.trim(line:sub(sep + 3))
-					local value_start = sep + 2
-					local hl_group = detect_cell_hl(value)
-					vim.api.nvim_buf_add_highlight(M.result_buf, ns, hl_group, ln, value_start, value_start + #value)
-				end
-			end
-		end
+		apply_vertical_highlights(M.result_buf, vert_lines)
 
 		M.refresh_result_winbar()
 		vim.notify(string.format(" Result (%.1fms) ", elapsed), vim.log.levels.INFO, { replace = notif_handle })
@@ -1530,7 +1456,6 @@ function M.show_result(raw, elapsed)
 	local widths = parser.calculate_column_widths(result)
 	local lines, has_header = render_result_lines(result, widths)
 
-	-- Calculate actual grid width from column widths
 	local grid_width = 0
 	for _, w in ipairs(widths) do
 		grid_width = grid_width + w + 2 -- +2 for " " padding on each side
@@ -1554,13 +1479,28 @@ function M.show_result(raw, elapsed)
 	end
 end
 
-function M.execute_query()
-	if not M.editor_buf or not vim.api.nvim_buf_is_valid(M.editor_buf) then
-		return
+--- Extract the query block under the cursor. Queries in the editor are
+--- separated by blank lines; this returns the contiguous non-empty lines
+--- surrounding the cursor's row.
+---@return string[]
+local function get_query_block_at_cursor()
+	local lines = vim.api.nvim_buf_get_lines(M.editor_buf, 0, -1, false)
+	local row = vim.api.nvim_win_get_cursor(M.editor_win)[1]
+	local total = #lines
+
+	local start_row, end_row = row, row
+	while start_row > 1 and vim.trim(lines[start_row - 1]) ~= "" do
+		start_row = start_row - 1
+	end
+	while end_row < total and vim.trim(lines[end_row + 1]) ~= "" do
+		end_row = end_row + 1
 	end
 
-	local lines = vim.api.nvim_buf_get_lines(M.editor_buf, 0, -1, false)
-	local query = table.concat(lines, "\n")
+	return vim.list_slice(lines, start_row, end_row)
+end
+
+---@param query string
+local function run_query_text(query)
 	query = vim.trim(query)
 
 	if query == "" then
@@ -1611,6 +1551,30 @@ function M.execute_query()
 		M.last_timestamp = os.time()
 		M.show_result(result, elapsed)
 	end)
+end
+
+--- Execute the whole editor buffer as a single query.
+function M.execute_query()
+	if not M.editor_buf or not vim.api.nvim_buf_is_valid(M.editor_buf) then
+		return
+	end
+
+	local lines = vim.api.nvim_buf_get_lines(M.editor_buf, 0, -1, false)
+	run_query_text(table.concat(lines, "\n"))
+end
+
+--- Execute only the query block under the cursor (queries are separated by
+--- blank lines in the editor).
+function M.execute_current_query()
+	if not M.editor_buf or not vim.api.nvim_buf_is_valid(M.editor_buf) then
+		return
+	end
+	if not M.editor_win or not vim.api.nvim_win_is_valid(M.editor_win) then
+		return
+	end
+
+	local block = get_query_block_at_cursor()
+	run_query_text(table.concat(block, "\n"))
 end
 
 ---@return number|nil
@@ -1672,7 +1636,6 @@ function M.open()
 		layout = filtered
 	end
 
-	-- Validate layout
 	local valid, err = validate_layout(layout)
 	if not valid then
 		vim.notify("[dbab] Invalid layout: " .. (err or "unknown") .. ". Using default.", vim.log.levels.WARN)
@@ -2089,6 +2052,13 @@ function M.setup_editor_keymaps(buf)
 	vim.keymap.set("n", keymaps.execute_leader, function()
 		M.execute_query()
 	end, opts)
+
+	-- Leader+e: Execute query under cursor (blank-line delimited)
+	if keymaps.execute_current then
+		vim.keymap.set("n", keymaps.execute_current, function()
+			M.execute_current_query()
+		end, opts)
+	end
 
 	-- Ctrl+s: Save
 	vim.keymap.set("n", keymaps.save, function()

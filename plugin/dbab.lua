@@ -1,6 +1,7 @@
 if vim.g.loaded_dbab then
 	return
 end
+
 vim.g.loaded_dbab = true
 
 vim.api.nvim_create_user_command("Dbab", function(opts)
@@ -32,11 +33,14 @@ vim.api.nvim_create_user_command("Dbab", function(opts)
 		dbab.list_connections()
 	elseif subcmd == "query" or subcmd == "q" then
 		local query = table.concat(vim.list_slice(args, 2), " ")
+
 		if query == "" then
 			vim.notify("[dbab] Usage: :Dbab query <sql>", vim.log.levels.WARN)
 			return
 		end
+
 		local result = dbab.execute(query)
+
 		if result ~= "" then
 			print(result)
 		end
@@ -47,17 +51,21 @@ end, {
 	nargs = "*",
 	complete = function(arg_lead, cmd_line, _)
 		local args = vim.split(cmd_line, "%s+")
+
 		if #args <= 2 then
 			local subcommands = { "connect", "disconnect", "pick", "history", "toggle-history", "list", "query" }
+
 			return vim.tbl_filter(function(s)
 				return s:match("^" .. arg_lead)
 			end, subcommands)
 		elseif args[2] == "connect" or args[2] == "disconnect" then
 			local dbab = require("dbab")
 			local connections = dbab.core.connection.list_connections()
+
 			local names = vim.tbl_map(function(c)
 				return c.name
 			end, connections)
+
 			return vim.tbl_filter(function(s)
 				return s:match("^" .. arg_lead)
 			end, names)

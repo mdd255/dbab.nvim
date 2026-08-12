@@ -8,12 +8,6 @@ M.ui = require("dbab.ui")
 function M.setup(opts)
 	M.config.setup(opts)
 	M.ui.highlights.setup()
-
-	-- Register CMP source if nvim-cmp is available
-	local has_cmp, cmp = pcall(require, "cmp")
-	if has_cmp then
-		cmp.register_source("dbab", require("cmp_dbab").new())
-	end
 end
 
 --- Open the Workbench UI
@@ -52,10 +46,12 @@ end
 ---@param name? string
 function M.disconnect(name)
 	name = name or M.core.connection.get_active_name()
+
 	if not name then
 		vim.notify("[dbab] No active connection to disconnect", vim.log.levels.WARN)
 		return
 	end
+
 	if M.core.connection.disconnect(name) then
 		vim.notify("[dbab] Disconnected: " .. name, vim.log.levels.INFO)
 	else
@@ -66,16 +62,19 @@ end
 --- List available connections
 function M.list_connections()
 	local connections = M.core.connection.list_connections()
+
 	if #connections == 0 then
 		vim.notify("[dbab] No connections configured", vim.log.levels.WARN)
 		return
 	end
 
 	local lines = { "Available connections:" }
+
 	for i, conn in ipairs(connections) do
 		local active = conn.name == M.core.connection.get_active_name() and " (active)" or ""
 		table.insert(lines, string.format("  %d. %s%s", i, conn.name, active))
 	end
+
 	vim.notify(table.concat(lines, "\n"), vim.log.levels.INFO)
 end
 

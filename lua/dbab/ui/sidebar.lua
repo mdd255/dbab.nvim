@@ -30,15 +30,6 @@ M.nodes = {}
 ---@type table<string, boolean>
 M.expanded = {}
 
-local db_hl_map = {
-	postgres = "DbabIconPostgres",
-	mysql = "DbabIconMysql",
-	mariadb = "DbabIconMariadb",
-	sqlite = "DbabIconSqlite",
-	redis = "DbabIconRedis",
-	mongodb = "DbabIconMongodb",
-}
-
 --- Connections that failed to connect (shown red)
 ---@type table<string, boolean>
 M.error_conns = {}
@@ -86,10 +77,74 @@ local function pad_right(text, width, suffix)
 	return text .. string.rep(" ", padding) .. suffix
 end
 
+local SIDEBAR_WIDTH = 30
+
+--- Render a "<icon> <label> (<count>)" folder row into lines/M.nodes.
+---@param lines string[]
+---@param depth number
+---@param icon string
+---@param label string
+---@param node_type string
+---@param expanded boolean
+---@param count number
+---@param parent string
+local function render_folder_row(lines, depth, icon, label, node_type, expanded, count, parent)
+	local text = indent(depth) .. icon .. " " .. label
+	local suffix = "(" .. count .. ")"
+	table.insert(lines, pad_right(text, SIDEBAR_WIDTH - #suffix - 1, suffix))
+	table.insert(M.nodes, { type = node_type, name = label, expanded = expanded, depth = depth, parent = parent })
+end
+
+--- Render a table node plus its columns (if expanded) into lines/M.nodes.
+--- node_schema is the table node's `schema` field (nil for flat/unschema'd DBs);
+--- column_schema is the schema recorded on child column nodes.
+---@param lines string[]
+---@param conn Dbab.Connection
+---@param conn_url string
+---@param tbl Dbab.Table
+---@param depth number
+---@param node_schema string|nil
+---@param column_schema string
+local function render_table_node(lines, conn, conn_url, tbl, depth, node_schema, column_schema)
+	local key_prefix = node_schema and (conn.name .. "." .. node_schema) or conn.name
+	local tbl_expanded = M.expanded[key_prefix .. "." .. tbl.name]
+	local type_icon = tbl.type == "view" and icons.view or icons.tbl
+
+	table.insert(lines, indent(depth) .. type_icon .. " " .. tbl.name)
+	table.insert(M.nodes, {
+		type = tbl.type,
+		name = tbl.name,
+		expanded = tbl_expanded,
+		depth = depth,
+		parent = conn.name,
+		schema = node_schema,
+	})
+
+	if not tbl_expanded then
+		return
+	end
+
+	for _, col in ipairs(schema.get_columns(conn_url, tbl.name)) do
+		local col_icon = col.is_primary and icons.column_pk or icons.column
+		local type_hint = col.data_type and (" : " .. col.data_type) or ""
+
+		table.insert(lines, indent(depth + 1) .. col_icon .. " " .. col.name .. type_hint)
+		table.insert(M.nodes, {
+			type = "column",
+			name = col.name,
+			expanded = false,
+			depth = depth + 1,
+			data_type = col.data_type,
+			is_primary = col.is_primary,
+			parent = tbl.name,
+			schema = column_schema,
+		})
+	end
+end
+
 ---@return string[]
 local function render_tree()
 	local lines = {}
-	local sidebar_width = 30
 
 	local connections = connection.list_connections()
 	if #connections == 0 then
@@ -152,18 +207,17 @@ local function render_tree()
 			local saved_queries = storage.list_queries(conn.name)
 
 			-- Buffers folder
-			local buffers_key = conn.name .. ".buffers"
-			local buffers_expanded = M.expanded[buffers_key]
-			local buffers_text = indent(1) .. icons.open_buffer .. " buffers"
-			local buffers_suffix = "(" .. #unsaved_buffers .. ")"
-			table.insert(lines, pad_right(buffers_text, sidebar_width - #buffers_suffix - 1, buffers_suffix))
-			table.insert(M.nodes, {
-				type = "buffers",
-				name = "buffers",
-				expanded = buffers_expanded,
-				depth = 1,
-				parent = conn.name,
-			})
+			local buffers_expanded = M.expanded[conn.name .. ".buffers"]
+			render_folder_row(
+				lines,
+				1,
+				icons.open_buffer,
+				"buffers",
+				"buffers",
+				buffers_expanded,
+				#unsaved_buffers,
+				conn.name
+			)
 
 			if buffers_expanded then
 				table.insert(lines, indent(2) .. icons.new_action .. " new")
@@ -189,18 +243,17 @@ local function render_tree()
 			end
 
 			-- Saved queries folder
-			local saved_key = conn.name .. ".saved"
-			local saved_expanded = M.expanded[saved_key]
-			local saved_text = indent(1) .. icons.saved_queries .. " saved queries"
-			local saved_suffix = "(" .. #saved_queries .. ")"
-			table.insert(lines, pad_right(saved_text, sidebar_width - #saved_suffix - 1, saved_suffix))
-			table.insert(M.nodes, {
-				type = "saved_queries",
-				name = "saved queries",
-				expanded = saved_expanded,
-				depth = 1,
-				parent = conn.name,
-			})
+			local saved_expanded = M.expanded[conn.name .. ".saved"]
+			render_folder_row(
+				lines,
+				1,
+				icons.saved_queries,
+				"saved queries",
+				"saved_queries",
+				saved_expanded,
+				#saved_queries,
+				conn.name
+			)
 
 			if saved_expanded then
 				for _, query in ipairs(saved_queries) do
@@ -230,8 +283,7 @@ local function render_tree()
 					or schema_db_type == "mongodb"
 					or schema_db_type == "redis"
 				then
-					local tables_key = conn.name .. ".tables"
-					local tables_expanded = M.expanded[tables_key]
+					local tables_expanded = M.expanded[conn.name .. ".tables"]
 					local all_tables = {}
 					local total_count = 0
 
@@ -244,122 +296,38 @@ local function render_tree()
 						end
 					end
 
-					local tables_text = indent(1) .. icons.tables .. " tables"
-					local tables_suffix = "(" .. total_count .. ")"
-					table.insert(lines, pad_right(tables_text, sidebar_width - #tables_suffix - 1, tables_suffix))
-					table.insert(M.nodes, {
-						type = "tables",
-						name = "tables",
-						expanded = tables_expanded,
-						depth = 1,
-						parent = conn.name,
-					})
+					render_folder_row(lines, 1, icons.tables, "tables", "tables", tables_expanded, total_count, conn.name)
 
 					if tables_expanded then
+						local column_schema = db_schemas[1] and db_schemas[1].name or "main"
 						for _, tbl in ipairs(all_tables) do
-							local tbl_key = conn.name .. "." .. tbl.name
-							local tbl_expanded = M.expanded[tbl_key]
-							local type_icon = tbl.type == "view" and icons.view or icons.tbl
-
-							table.insert(lines, indent(2) .. type_icon .. " " .. tbl.name)
-							table.insert(M.nodes, {
-								type = tbl.type,
-								name = tbl.name,
-								expanded = tbl_expanded,
-								depth = 2,
-								parent = conn.name,
-								schema = nil,
-							})
-
-							if tbl_expanded then
-								local columns = schema.get_columns(conn_url, tbl.name)
-								for _, col in ipairs(columns) do
-									local col_icon = col.is_primary and icons.column_pk or icons.column
-									local type_hint = col.data_type and (" : " .. col.data_type) or ""
-
-									table.insert(lines, indent(3) .. col_icon .. " " .. col.name .. type_hint)
-									table.insert(M.nodes, {
-										type = "column",
-										name = col.name,
-										expanded = false,
-										depth = 3,
-										data_type = col.data_type,
-										is_primary = col.is_primary,
-										parent = tbl.name,
-										schema = db_schemas[1] and db_schemas[1].name or "main",
-									})
-								end
-							end
+							render_table_node(lines, conn, conn_url, tbl, 2, nil, column_schema)
 						end
 					end
 				else
-					local schemas_key = conn.name .. ".schemas"
-					local schemas_expanded = M.expanded[schemas_key]
-
-					local schemas_text = indent(1) .. icons.schemas .. " schemas"
-					local schemas_suffix = "(" .. #db_schemas .. ")"
-					table.insert(lines, pad_right(schemas_text, sidebar_width - #schemas_suffix - 1, schemas_suffix))
-					table.insert(M.nodes, {
-						type = "schemas",
-						name = "schemas",
-						expanded = schemas_expanded,
-						depth = 1,
-						parent = conn.name,
-					})
+					local schemas_expanded = M.expanded[conn.name .. ".schemas"]
+					render_folder_row(lines, 1, icons.schemas, "schemas", "schemas", schemas_expanded, #db_schemas, conn.name)
 
 					if schemas_expanded then
 						for _, sch in ipairs(db_schemas) do
-							local schema_key = conn.name .. ".schema." .. sch.name
-							local schema_expanded = M.expanded[schema_key]
+							local schema_expanded = M.expanded[conn.name .. ".schema." .. sch.name]
 							local tables = schema_expanded and schema.get_tables(conn_url, sch.name) or {}
 							local table_count = schema_expanded and #tables or sch.table_count
 
-							local schema_text = indent(2) .. icons.schema_node .. " " .. sch.name
-							local schema_suffix = "(" .. table_count .. ")"
-							table.insert(lines, pad_right(schema_text, sidebar_width - #schema_suffix - 1, schema_suffix))
-							table.insert(M.nodes, {
-								type = "schema",
-								name = sch.name,
-								expanded = schema_expanded,
-								depth = 2,
-								parent = conn.name,
-							})
+							render_folder_row(
+								lines,
+								2,
+								icons.schema_node,
+								sch.name,
+								"schema",
+								schema_expanded,
+								table_count,
+								conn.name
+							)
 
 							if schema_expanded then
 								for _, tbl in ipairs(tables) do
-									local tbl_key = conn.name .. "." .. sch.name .. "." .. tbl.name
-									local tbl_expanded = M.expanded[tbl_key]
-									local type_icon = tbl.type == "view" and icons.view or icons.tbl
-
-									table.insert(lines, indent(3) .. type_icon .. " " .. tbl.name)
-									table.insert(M.nodes, {
-										type = tbl.type,
-										name = tbl.name,
-										expanded = tbl_expanded,
-										depth = 3,
-										parent = conn.name,
-										schema = sch.name,
-									})
-
-									if tbl_expanded then
-										local columns = schema.get_columns(conn_url, tbl.name)
-										for _, col in ipairs(columns) do
-											local col_icon = col.is_primary and icons.column_pk or icons.column
-											local type_hint = col.data_type and (" : " .. col.data_type) or ""
-
-											table.insert(lines, indent(4) .. col_icon .. " " .. col.name .. type_hint)
-											table.insert(M.nodes, {
-												type = "column",
-												name = col.name,
-												expanded = false,
-												depth = 4,
-												data_type = col.data_type,
-												is_primary = col.is_primary,
-												parent = tbl.name,
-												schema = sch.name,
-											})
-										end
-									end
+									render_table_node(lines, conn, conn_url, tbl, 3, sch.name, sch.name)
 								end
 							end
 						end
@@ -410,15 +378,52 @@ local all_glyphs = {
 }
 
 ---@param line string
----@return number byte offset where icon starts
-local function find_icon_start(line)
+---@return number icon_start, number icon_len
+local function find_icon(line)
 	for _, icon in ipairs(all_glyphs) do
 		local pos = line:find(icon, 1, true)
 		if pos then
-			return pos - 1
+			return pos - 1, #icon
 		end
 	end
-	return 0
+	return 0, 0
+end
+
+--- Node types whose folder/count line gets "icon" + "text (n)" highlighting.
+local count_icon_hl = {
+	buffers = "DbabSidebarIconNewQuery",
+	saved_queries = "DbabSidebarIconColumn",
+	schemas = "DbabSidebarIconSchemas",
+	tables = "DbabSidebarIconTable",
+	schema = "DbabSidebarIconSchema",
+}
+
+--- Node types whose line gets a plain "icon" + "text" highlighting.
+local plain_icon_hl = {
+	new_query_action = "DbabSidebarIconNewQuery",
+	open_buffer = "DbabSidebarIconNewQuery",
+	saved_query = "DbabSidebarIconColumn",
+	table = "DbabSidebarIconTable",
+	view = "DbabSidebarIconTable",
+}
+
+---@param buf number
+---@param ns number
+---@param line string
+---@param line_num number
+---@param hl string
+---@param icon_start number
+---@param icon_len number
+---@param text_start number
+local function highlight_count_line(buf, ns, line, line_num, hl, icon_start, icon_len, text_start)
+	vim.api.nvim_buf_add_highlight(buf, ns, hl, line_num, icon_start, icon_start + icon_len)
+	local count_pos = line:find("%(%d+%)")
+	if count_pos then
+		vim.api.nvim_buf_add_highlight(buf, ns, "DbabSidebarText", line_num, text_start, count_pos - 2)
+		vim.api.nvim_buf_add_highlight(buf, ns, "DbabSidebarType", line_num, count_pos - 1, -1)
+	else
+		vim.api.nvim_buf_add_highlight(buf, ns, "DbabSidebarText", line_num, text_start, -1)
+	end
 end
 
 function M.apply_highlights()
@@ -438,61 +443,16 @@ function M.apply_highlights()
 			goto continue
 		end
 
-		local icon_start = find_icon_start(line)
-		local icon_len = 0
-		for _, glyph in ipairs(all_glyphs) do
-			local pos = line:find(glyph, 1, true)
-			if pos and pos - 1 == icon_start then
-				icon_len = #glyph
-				break
-			end
-		end
+		local icon_start, icon_len = find_icon(line)
 		local text_start = icon_start + icon_len + 1
 
 		if node.type == "connection" then
-			-- Icon and name share one color, chosen by connection status + db type
 			local hl = conn_status_hl(node.status, node.db_type)
 			vim.api.nvim_buf_add_highlight(M.buf, ns, hl, line_num, icon_start, -1)
-		elseif node.type == "buffers" or node.type == "saved_queries" then
-			local folder_hl = node.type == "buffers" and "DbabSidebarIconNewQuery" or "DbabSidebarIconColumn"
-			vim.api.nvim_buf_add_highlight(M.buf, ns, folder_hl, line_num, icon_start, icon_start + icon_len)
-			local count_pos = line:find("%(%d+%)")
-			if count_pos then
-				vim.api.nvim_buf_add_highlight(M.buf, ns, "DbabSidebarText", line_num, text_start, count_pos - 2)
-				vim.api.nvim_buf_add_highlight(M.buf, ns, "DbabSidebarType", line_num, count_pos - 1, -1)
-			else
-				vim.api.nvim_buf_add_highlight(M.buf, ns, "DbabSidebarText", line_num, text_start, -1)
-			end
-		elseif node.type == "new_query_action" then
-			vim.api.nvim_buf_add_highlight(M.buf, ns, "DbabSidebarIconNewQuery", line_num, icon_start, icon_start + icon_len)
-			vim.api.nvim_buf_add_highlight(M.buf, ns, "DbabSidebarText", line_num, text_start, -1)
-		elseif node.type == "open_buffer" then
-			vim.api.nvim_buf_add_highlight(M.buf, ns, "DbabSidebarIconNewQuery", line_num, icon_start, icon_start + icon_len)
-			vim.api.nvim_buf_add_highlight(M.buf, ns, "DbabSidebarText", line_num, text_start, -1)
-		elseif node.type == "saved_query" then
-			vim.api.nvim_buf_add_highlight(M.buf, ns, "DbabSidebarIconColumn", line_num, icon_start, icon_start + icon_len)
-			vim.api.nvim_buf_add_highlight(M.buf, ns, "DbabSidebarText", line_num, text_start, -1)
-		elseif node.type == "schemas" or node.type == "tables" then
-			local folder_hl = node.type == "schemas" and "DbabSidebarIconSchemas" or "DbabSidebarIconTable"
-			vim.api.nvim_buf_add_highlight(M.buf, ns, folder_hl, line_num, icon_start, icon_start + icon_len)
-			local count_pos = line:find("%(%d+%)")
-			if count_pos then
-				vim.api.nvim_buf_add_highlight(M.buf, ns, "DbabSidebarText", line_num, text_start, count_pos - 2)
-				vim.api.nvim_buf_add_highlight(M.buf, ns, "DbabSidebarType", line_num, count_pos - 1, -1)
-			else
-				vim.api.nvim_buf_add_highlight(M.buf, ns, "DbabSidebarText", line_num, text_start, -1)
-			end
-		elseif node.type == "schema" then
-			vim.api.nvim_buf_add_highlight(M.buf, ns, "DbabSidebarIconSchema", line_num, icon_start, icon_start + icon_len)
-			local count_pos = line:find("%(%d+%)")
-			if count_pos then
-				vim.api.nvim_buf_add_highlight(M.buf, ns, "DbabSidebarText", line_num, text_start, count_pos - 2)
-				vim.api.nvim_buf_add_highlight(M.buf, ns, "DbabSidebarType", line_num, count_pos - 1, -1)
-			else
-				vim.api.nvim_buf_add_highlight(M.buf, ns, "DbabSidebarText", line_num, text_start, -1)
-			end
-		elseif node.type == "table" or node.type == "view" then
-			vim.api.nvim_buf_add_highlight(M.buf, ns, "DbabSidebarIconTable", line_num, icon_start, icon_start + icon_len)
+		elseif count_icon_hl[node.type] then
+			highlight_count_line(M.buf, ns, line, line_num, count_icon_hl[node.type], icon_start, icon_len, text_start)
+		elseif plain_icon_hl[node.type] then
+			vim.api.nvim_buf_add_highlight(M.buf, ns, plain_icon_hl[node.type], line_num, icon_start, icon_start + icon_len)
 			vim.api.nvim_buf_add_highlight(M.buf, ns, "DbabSidebarText", line_num, text_start, -1)
 		elseif node.type == "column" then
 			local col_hl = node.is_primary and "DbabSidebarIconPK" or "DbabSidebarIconColumn"
@@ -507,6 +467,22 @@ function M.apply_highlights()
 		end
 
 		::continue::
+	end
+end
+
+--- Finish a successful connect: clear loading state, expand the node, and
+--- open a fresh query tab focused in the editor.
+---@param node_name string
+local function finish_connect(node_name)
+	M.is_loading = false
+	M.loading_conn_name = nil
+	M.expanded[node_name] = true
+	M.refresh()
+	workbench.refresh_history()
+	vim.notify("[dbab] Connected to: " .. node_name, vim.log.levels.INFO)
+	workbench.create_new_tab(nil, nil, node_name, false)
+	if workbench.editor_win and vim.api.nvim_win_is_valid(workbench.editor_win) then
+		vim.api.nvim_set_current_win(workbench.editor_win)
 	end
 end
 
@@ -549,16 +525,7 @@ function M.toggle_node()
 
 					local pending = #schemas
 					if pending == 0 then
-						M.is_loading = false
-						M.loading_conn_name = nil
-						M.expanded[node.name] = true
-						M.refresh()
-						workbench.refresh_history()
-						vim.notify("[dbab] Connected to: " .. node.name, vim.log.levels.INFO)
-						workbench.create_new_tab(nil, nil, node.name, false)
-						if workbench.editor_win and vim.api.nvim_win_is_valid(workbench.editor_win) then
-							vim.api.nvim_set_current_win(workbench.editor_win)
-						end
+						finish_connect(node.name)
 						return
 					end
 
@@ -566,16 +533,7 @@ function M.toggle_node()
 						schema.get_tables_async(url, sch.name, function(_, _)
 							pending = pending - 1
 							if pending <= 0 then
-								M.is_loading = false
-								M.loading_conn_name = nil
-								M.expanded[node.name] = true
-								M.refresh()
-								workbench.refresh_history()
-								vim.notify("[dbab] Connected to: " .. node.name, vim.log.levels.INFO)
-								workbench.create_new_tab(nil, nil, node.name, false)
-								if workbench.editor_win and vim.api.nvim_win_is_valid(workbench.editor_win) then
-									vim.api.nvim_set_current_win(workbench.editor_win)
-								end
+								finish_connect(node.name)
 							end
 						end)
 					end

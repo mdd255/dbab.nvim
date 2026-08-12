@@ -63,7 +63,6 @@ A lightweight database client for Neovim. Query databases directly from your edi
     "MunifTanjim/nui.nvim",
     "nvim-lua/plenary.nvim",       -- Optional: for async execution
     "tpope/vim-dadbod",            -- Optional: for executor = "dadbod"
-    "hrsh7th/nvim-cmp",            -- Optional: for nvim-cmp autocompletion
   },
   -- For blink.cmp, the source is included in this plugin (blink_dbab)
   config = function()
@@ -78,19 +77,6 @@ A lightweight database client for Neovim. Query databases directly from your edi
 ```
 
 ## Autocompletion (Optional)
-
-### nvim-cmp
-
-If you use `nvim-cmp`, add `dbab` to your sources to enable SQL autocompletion (tables, columns, keywords):
-
-```lua
-require("cmp").setup({
-  sources = {
-    { name = "dbab" },
-    -- other sources...
-  },
-})
-```
 
 ### blink.cmp
 

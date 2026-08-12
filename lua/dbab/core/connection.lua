@@ -30,15 +30,17 @@ function M.parse_type(url)
 end
 
 ---@param url string
----@return string Resolved URL (환경변수 확장)
+---@return string Resolved URL with env vars expanded
 function M.resolve_url(url)
 	-- Whole-string form: "$VAR" -> value of VAR (the entire URL is in the env var)
 	if url:match("^%$[%w_]+$") then
 		local env_var = url:sub(2)
 		local resolved = os.getenv(env_var)
+
 		if resolved then
 			return resolved
 		end
+
 		vim.notify("[dbab] Environment variable not found: " .. env_var, vim.log.levels.ERROR)
 		return url
 	end
@@ -46,19 +48,23 @@ function M.resolve_url(url)
 	-- Inline forms: "${VAR}" and "$VAR" embedded anywhere in the URL
 	local function expand(name)
 		local val = os.getenv(name)
+
 		if not val then
 			vim.notify("[dbab] Environment variable not found: " .. name, vim.log.levels.ERROR)
 			return nil
 		end
+
 		return val
 	end
 
 	local result = url:gsub("%${([%w_]+)}", function(name)
 		return expand(name) or ("${" .. name .. "}")
 	end)
+
 	result = result:gsub("%$([%w_]+)", function(name)
 		return expand(name) or ("$" .. name)
 	end)
+
 	return result
 end
 
@@ -66,11 +72,13 @@ end
 ---@return Dbab.Connection|nil
 function M.get_connection_by_name(name)
 	local connections = config.get().connections
+
 	for _, conn in ipairs(connections) do
 		if conn.name == name then
 			return conn
 		end
 	end
+
 	return nil
 end
 
@@ -78,9 +86,11 @@ end
 ---@return string|nil
 function M.get_resolved_url_by_name(name)
 	local conn = M.get_connection_by_name(name)
+
 	if not conn then
 		return nil
 	end
+
 	return M.resolve_url(conn.url)
 end
 
@@ -88,12 +98,14 @@ end
 ---@return boolean
 function M.set_active(name)
 	local conn = M.get_connection_by_name(name)
+
 	if conn then
 		M.active_name = conn.name
 		M.active_url = M.resolve_url(conn.url)
 		M.connected_names[conn.name] = true
 		return true
 	end
+
 	return false
 end
 
@@ -109,10 +121,12 @@ end
 function M.disconnect(name)
 	local was = M.connected_names[name] == true
 	M.connected_names[name] = nil
+
 	if M.active_name == name then
 		M.active_name = nil
 		M.active_url = nil
 	end
+
 	return was
 end
 

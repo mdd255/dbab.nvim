@@ -18,27 +18,25 @@ end
 ---@return boolean success
 local function ensure_data_dir()
 	local data_dir = vim.fn.stdpath("data") .. "/dbab"
+
 	if vim.fn.isdirectory(data_dir) == 0 then
 		local result = vim.fn.mkdir(data_dir, "p")
 		return result == 1
 	end
+
 	return true
 end
 
 --- Load history from disk
 function M.load()
 	local cfg = config.get()
+
 	if not cfg.history.persist then
 		return
 	end
 
-	local path = M.get_history_path()
-	if vim.fn.filereadable(path) == 0 then
-		M.entries = {}
-		return
-	end
+	local file = io.open(M.get_history_path(), "r")
 
-	local file = io.open(path, "r")
 	if not file then
 		M.entries = {}
 		return
@@ -48,16 +46,13 @@ function M.load()
 	file:close()
 
 	local ok, data = pcall(vim.json.decode, content)
-	if ok and type(data) == "table" then
-		M.entries = data
-	else
-		M.entries = {}
-	end
+	M.entries = (ok and type(data) == "table") and data or {}
 end
 
 --- Save history to disk
 function M.save()
 	local cfg = config.get()
+
 	if not cfg.history.persist then
 		return
 	end
@@ -69,22 +64,24 @@ function M.save()
 
 	local path = M.get_history_path()
 	local file = io.open(path, "w")
+
 	if not file then
 		vim.notify("[dbab] Failed to save history", vim.log.levels.ERROR)
 		return
 	end
 
 	local ok, json = pcall(vim.json.encode, M.entries)
+
 	if ok then
 		file:write(json)
 	end
+
 	file:close()
 end
 
---- Add a new history entry
+--- Add a new history entry (newest first)
 ---@param entry Dbab.HistoryEntry
 function M.add(entry)
-	-- Add to beginning (newest first)
 	table.insert(M.entries, 1, entry)
 
 	-- Trim to configured max entries per connection
@@ -92,9 +89,11 @@ function M.add(entry)
 	local conn_name = entry.conn_name
 	local count = 0
 	local i = 1
+
 	while i <= #M.entries do
 		if M.entries[i].conn_name == conn_name then
 			count = count + 1
+
 			if count > limit then
 				table.remove(M.entries, i)
 			else
@@ -105,7 +104,6 @@ function M.add(entry)
 		end
 	end
 
-	-- Save to disk
 	M.save()
 end
 
@@ -125,11 +123,13 @@ end
 ---@param conn_name string
 function M.clear_for_connection(conn_name)
 	local kept = {}
+
 	for _, entry in ipairs(M.entries) do
 		if entry.conn_name ~= conn_name then
 			table.insert(kept, entry)
 		end
 	end
+
 	M.entries = kept
 	M.save()
 end
@@ -147,10 +147,8 @@ end
 ---@param query string
 ---@return string verb, string? target
 local function parse_query(query)
-	-- Normalize whitespace
 	local normalized = query:gsub("%s+", " "):upper():sub(1, 200)
 
-	-- Match common SQL patterns
 	local patterns = {
 		{ pattern = "^%s*SELECT%s+.-%s+FROM%s+(%S+)", verb = "SEL" },
 		{ pattern = "^%s*INSERT%s+INTO%s+(%S+)", verb = "INS" },
@@ -164,6 +162,7 @@ local function parse_query(query)
 
 	for _, p in ipairs(patterns) do
 		local target = normalized:match(p.pattern)
+
 		if target then
 			-- Clean up target (remove quotes, schema prefix)
 			target = target:gsub("[\"'`%[%]]", ""):match("[^.]+$") or target
@@ -174,26 +173,24 @@ local function parse_query(query)
 	return "SQL", nil
 end
 
+--- Collapse whitespace and truncate a query to `len` chars, adding an ellipsis.
+---@param query string
+---@param len number
+---@return string
+local function truncate_query(query, len)
+	local short = query:gsub("%s+", " "):sub(1, len)
+	return #query > len and short .. "…" or short
+end
+
 --- Format a history entry for display
 ---@param entry Dbab.HistoryEntry
 ---@return string summary, string verb
 function M.format_summary(entry)
 	local verb, target = parse_query(entry.query)
 	local time = os.date("%H:%M", entry.timestamp)
+	local suffix = target and (verb .. " " .. target) or truncate_query(entry.query, 15)
 
-	local summary
-	if target then
-		summary = time .. " " .. verb .. " " .. target
-	else
-		-- Truncate query if no target found
-		local short_query = entry.query:gsub("%s+", " "):sub(1, 15)
-		if #entry.query > 15 then
-			short_query = short_query .. "…"
-		end
-		summary = time .. " " .. short_query
-	end
-
-	return summary, verb
+	return time .. " " .. suffix, verb
 end
 
 --- Get query target (table name or truncated query)
@@ -201,15 +198,7 @@ end
 ---@return string target
 function M.get_query_target(entry)
 	local _, target = parse_query(entry.query)
-	if target then
-		return target
-	end
-	-- Truncate query if no target found
-	local short_query = entry.query:gsub("%s+", " "):sub(1, 12)
-	if #entry.query > 12 then
-		short_query = short_query .. "…"
-	end
-	return short_query
+	return target or truncate_query(entry.query, 12)
 end
 
 --- Get icon for a verb

@@ -2,58 +2,54 @@
 --- Stores queries in ~/.local/share/nvim/dbab/queries/{connection_name}/{query_name}.sql
 local M = {}
 
---- Get the base directory for query storage
 ---@return string
 function M.get_queries_dir()
-	local data_dir = vim.fn.stdpath("data")
-	return data_dir .. "/dbab/queries"
+	return vim.fn.stdpath("data") .. "/dbab/queries"
 end
 
---- Get the directory for a specific connection
 ---@param conn_name string
 ---@return string
 function M.get_connection_dir(conn_name)
 	return M.get_queries_dir() .. "/" .. conn_name
 end
 
---- Ensure a directory exists
 ---@param dir string
 ---@return boolean success
 local function ensure_dir(dir)
-	if vim.fn.isdirectory(dir) == 0 then
-		local result = vim.fn.mkdir(dir, "p")
-		return result == 1
+	if vim.fn.isdirectory(dir) == 1 then
+		return true
 	end
-	return true
+
+	return vim.fn.mkdir(dir, "p") == 1
 end
 
---- Sanitize a filename (remove invalid characters)
+--- Invalid filename characters become "_"; a leading dot is escaped so the
+--- file isn't hidden and doesn't collide with dotfiles.
 ---@param name string
 ---@return string
 local function sanitize_filename(name)
-	-- Remove or replace characters that are invalid in filenames
 	local sanitized = name:gsub('[/\\:*?"<>|]', "_")
-	-- Ensure it doesn't start with a dot
+
 	if sanitized:sub(1, 1) == "." then
 		sanitized = "_" .. sanitized
 	end
+
 	return sanitized
 end
 
---- Get the full path for a query file
 ---@param conn_name string
 ---@param query_name string
 ---@return string
 function M.get_query_path(conn_name, query_name)
 	local sanitized = sanitize_filename(query_name)
-	-- Add .sql extension if not present
+
 	if not sanitized:match("%.sql$") then
 		sanitized = sanitized .. ".sql"
 	end
+
 	return M.get_connection_dir(conn_name) .. "/" .. sanitized
 end
 
---- List all saved queries for a connection
 ---@param conn_name string
 ---@return {name: string, path: string, modified: number}[]
 function M.list_queries(conn_name)
@@ -65,11 +61,13 @@ function M.list_queries(conn_name)
 	end
 
 	local files = vim.fn.readdir(dir)
+
 	for _, file in ipairs(files) do
 		if file:match("%.sql$") then
 			local path = dir .. "/" .. file
 			local stat = vim.loop.fs_stat(path)
 			local name = file:gsub("%.sql$", "")
+
 			table.insert(queries, {
 				name = name,
 				path = path,
@@ -86,7 +84,6 @@ function M.list_queries(conn_name)
 	return queries
 end
 
---- Save a query to disk
 ---@param conn_name string
 ---@param query_name string
 ---@param content string
@@ -101,6 +98,7 @@ function M.save_query(conn_name, query_name, content)
 	local path = M.get_query_path(conn_name, query_name)
 
 	local file = io.open(path, "w")
+
 	if not file then
 		return false, "Failed to open file for writing: " .. path
 	end
@@ -111,7 +109,6 @@ function M.save_query(conn_name, query_name, content)
 	return true, nil
 end
 
---- Load a query from disk
 ---@param conn_name string
 ---@param query_name string
 ---@return string? content, string? error
@@ -119,6 +116,7 @@ function M.load_query(conn_name, query_name)
 	local path = M.get_query_path(conn_name, query_name)
 
 	local file = io.open(path, "r")
+
 	if not file then
 		return nil, "Failed to open file: " .. path
 	end
@@ -129,7 +127,6 @@ function M.load_query(conn_name, query_name)
 	return content, nil
 end
 
---- Delete a query from disk
 ---@param conn_name string
 ---@param query_name string
 ---@return boolean success, string? error
@@ -141,6 +138,7 @@ function M.delete_query(conn_name, query_name)
 	end
 
 	local result = vim.fn.delete(path)
+
 	if result ~= 0 then
 		return false, "Failed to delete file: " .. path
 	end
@@ -148,7 +146,6 @@ function M.delete_query(conn_name, query_name)
 	return true, nil
 end
 
---- Rename a query
 ---@param conn_name string
 ---@param old_name string
 ---@param new_name string
@@ -166,6 +163,7 @@ function M.rename_query(conn_name, old_name, new_name)
 	end
 
 	local result = vim.fn.rename(old_path, new_path)
+
 	if result ~= 0 then
 		return false, "Failed to rename file"
 	end
@@ -173,7 +171,6 @@ function M.rename_query(conn_name, old_name, new_name)
 	return true, nil
 end
 
---- Check if a query exists
 ---@param conn_name string
 ---@param query_name string
 ---@return boolean
@@ -182,7 +179,6 @@ function M.query_exists(conn_name, query_name)
 	return vim.fn.filereadable(path) == 1
 end
 
---- Get the count of saved queries for a connection
 ---@param conn_name string
 ---@return number
 function M.get_query_count(conn_name)

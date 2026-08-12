@@ -1,5 +1,4 @@
---- History UI module for dbab.nvim
---- Renders the history panel in the bottom-left quadrant
+--- History panel UI: renders the history buffer/window in the bottom-left quadrant
 local history = require("dbab.core.history")
 local config = require("dbab.config")
 local connection = require("dbab.core.connection")
@@ -10,12 +9,15 @@ local M = {}
 ---@return string|nil
 local function get_current_connection_name()
 	local ok, workbench = pcall(require, "dbab.ui.workbench")
+
 	if ok and workbench and workbench.get_active_connection_context then
 		local conn_name = workbench.get_active_connection_context()
+
 		if conn_name then
 			return conn_name
 		end
 	end
+
 	return connection.get_active_name()
 end
 
@@ -28,80 +30,47 @@ M.win = nil
 ---@type table[] entry_line_map: {{start=N, finish=N}, ...} (1-indexed line numbers)
 M.entry_line_map = {}
 
---- Apply treesitter SQL syntax highlighting to a portion of a line
----@param buf number Buffer number
----@param ns number Namespace id
----@param line number Line number (0-indexed)
----@param col_offset number Column offset where the query starts
----@param query_text string The SQL query text to highlight
-local function apply_treesitter_highlights(buf, ns, line, col_offset, query_text)
-	-- Try to get SQL parser
+--- Parse `query_text` as SQL and return its root node plus the SQL highlights query
+---@param query_text string
+---@return TSNode|nil root
+---@return vim.treesitter.Query|nil hl_query
+local function parse_sql_highlights(query_text)
 	local ok, ts_parser = pcall(vim.treesitter.get_string_parser, query_text, "sql")
+
 	if not ok or not ts_parser then
-		-- Fallback: no highlighting
-		return
+		return nil, nil
 	end
 
 	local tree = ts_parser:parse()[1]
+
 	if not tree then
-		return
+		return nil, nil
 	end
 
-	-- Get highlights query for SQL
 	local query_ok, hl_query = pcall(vim.treesitter.query.get, "sql", "highlights")
+
 	if not query_ok or not hl_query then
-		return
+		return nil, nil
 	end
 
-	local root = tree:root()
-
-	-- Iterate through all captures and apply highlights
-	for id, node in hl_query:iter_captures(root, query_text, 0, -1) do
-		local name = hl_query.captures[id]
-		local start_row, start_col, _, end_col = node:range()
-
-		-- Only process nodes on the first row (single line query)
-		if start_row == 0 then
-			-- Map treesitter capture names to highlight groups
-			local hl_group = "@" .. name .. ".sql"
-
-			-- Apply highlight with column offset
-			pcall(vim.api.nvim_buf_add_highlight, buf, ns, hl_group, line, col_offset + start_col, col_offset + end_col)
-		end
-	end
+	return tree:root(), hl_query
 end
 
---- Apply treesitter SQL syntax highlighting to multi-line query text
+--- Apply treesitter SQL syntax highlighting to `query_text` rendered starting at buffer
+--- line `start_line`. For a single-line query, pass the same offset for both params.
 ---@param buf number Buffer number
 ---@param ns number Namespace id
----@param start_line number First buffer line (0-indexed) where query starts
----@param first_line_offset number Column offset for the first line only
+---@param start_line number First buffer line (0-indexed) where the query starts
+---@param first_line_offset number Column offset for the first line
 ---@param other_line_offset number Column offset for subsequent lines
----@param query_text string The full multi-line SQL query text
-local function apply_multiline_treesitter_highlights(
-	buf,
-	ns,
-	start_line,
-	first_line_offset,
-	other_line_offset,
-	query_text
-)
-	local ok, ts_parser = pcall(vim.treesitter.get_string_parser, query_text, "sql")
-	if not ok or not ts_parser then
+---@param query_text string The SQL query text to highlight
+local function apply_treesitter_highlights(buf, ns, start_line, first_line_offset, other_line_offset, query_text)
+	local root, hl_query = parse_sql_highlights(query_text)
+
+	if not root then
 		return
 	end
 
-	local tree = ts_parser:parse()[1]
-	if not tree then
-		return
-	end
-
-	local query_ok, hl_query = pcall(vim.treesitter.query.get, "sql", "highlights")
-	if not query_ok or not hl_query then
-		return
-	end
-
-	local root = tree:root()
 	local query_lines = vim.split(query_text, "\n")
 
 	for id, node in hl_query:iter_captures(root, query_text, 0, -1) do
@@ -111,6 +80,7 @@ local function apply_multiline_treesitter_highlights(
 
 		if start_row == end_row then
 			local offset = start_row == 0 and first_line_offset or other_line_offset
+
 			pcall(
 				vim.api.nvim_buf_add_highlight,
 				buf,
@@ -124,6 +94,7 @@ local function apply_multiline_treesitter_highlights(
 			for row = start_row, end_row do
 				local offset = row == 0 and first_line_offset or other_line_offset
 				local s_col, e_col
+
 				if row == start_row then
 					s_col = start_col
 					e_col = #(query_lines[row + 1] or "")
@@ -134,13 +105,13 @@ local function apply_multiline_treesitter_highlights(
 					s_col = 0
 					e_col = #(query_lines[row + 1] or "")
 				end
+
 				pcall(vim.api.nvim_buf_add_highlight, buf, ns, hl_group, start_line + row, offset + s_col, offset + e_col)
 			end
 		end
 	end
 end
 
---- Create or get the history buffer
 ---@return number buf
 function M.get_or_create_buf()
 	if M.buf and vim.api.nvim_buf_is_valid(M.buf) then
@@ -158,6 +129,79 @@ function M.get_or_create_buf()
 	return M.buf
 end
 
+local CONN_NAME_WIDTH = 8
+
+--- Truncate/pad a connection name to CONN_NAME_WIDTH display columns
+---@param name string
+---@param pad boolean pad with trailing spaces to a fixed width
+---@return string
+local function fit_conn_name(name, pad)
+	local display_len = vim.fn.strdisplaywidth(name)
+
+	if display_len <= CONN_NAME_WIDTH then
+		return pad and (name .. string.rep(" ", CONN_NAME_WIDTH - display_len)) or name
+	end
+
+	local truncated, len = "", 0
+
+	for i = 0, vim.fn.strchars(name) - 1 do
+		local char = vim.fn.strcharpart(name, i, 1)
+		local char_width = vim.fn.strdisplaywidth(char)
+
+		if len + char_width + 1 > CONN_NAME_WIDTH then
+			break
+		end
+
+		truncated = truncated .. char
+		len = len + char_width
+	end
+
+	return pad and (truncated .. "…" .. string.rep(" ", CONN_NAME_WIDTH - len - 1)) or (truncated .. "…")
+end
+
+--- Get treesitter highlights for short format (verb + target): parses the
+--- original query and returns the highlight group of the first keyword and
+--- the first identifier/table name found after it.
+---@param query string Original SQL query
+---@return string verb_hl Highlight group for verb
+---@return string target_hl Highlight group for target
+local function get_short_highlights(query)
+	local verb_hl = "@keyword.sql"
+	local target_hl = "@variable.sql"
+
+	local root, hl_query = parse_sql_highlights(query)
+
+	if not root then
+		return verb_hl, target_hl
+	end
+
+	local found_keyword, found_identifier = false, false
+
+	for id, _ in hl_query:iter_captures(root, query, 0, -1) do
+		local name = hl_query.captures[id]
+
+		if not found_keyword and name:match("keyword") then
+			verb_hl = "@" .. name .. ".sql"
+			found_keyword = true
+		end
+
+		if
+			found_keyword
+			and not found_identifier
+			and (name:match("variable") or name:match("identifier") or name:match("type"))
+		then
+			target_hl = "@" .. name .. ".sql"
+			found_identifier = true
+		end
+
+		if found_keyword and found_identifier then
+			break
+		end
+	end
+
+	return verb_hl, target_hl
+end
+
 --- Render entries in compact mode (one line per entry)
 ---@param entries Dbab.HistoryEntry[]
 ---@param win_width number
@@ -168,91 +212,49 @@ local function render_compact(entries, win_width, cfg)
 	local r_highlights = {}
 	local r_line_map = {}
 
-	local CONN_NAME_WIDTH = 8
-	---@param name string
-	---@return string
-	local function fit_conn_name(name)
-		local display_len = vim.fn.strdisplaywidth(name)
-		if display_len > CONN_NAME_WIDTH then
-			local truncated = ""
-			local len = 0
-			for i = 0, vim.fn.strchars(name) - 1 do
-				local char = vim.fn.strcharpart(name, i, 1)
-				local char_width = vim.fn.strdisplaywidth(char)
-				if len + char_width + 1 > CONN_NAME_WIDTH then
-					break
-				end
-				truncated = truncated .. char
-				len = len + char_width
-			end
-			return truncated .. "…" .. string.rep(" ", CONN_NAME_WIDTH - len - 1)
-		else
-			return name .. string.rep(" ", CONN_NAME_WIDTH - display_len)
-		end
-	end
-
-	--- Get treesitter highlights for short format (verb + target)
-	--- Parses original query and extracts keyword/identifier highlights
-	---@param query string Original SQL query
-	---@return string verb_hl Highlight group for verb
-	---@return string target_hl Highlight group for target
-	local function get_short_highlights(query)
-		local verb_hl = "@keyword.sql"
-		local target_hl = "@variable.sql"
-
-		-- Try to parse original query with treesitter
-		local ok, ts_parser = pcall(vim.treesitter.get_string_parser, query, "sql")
-		if not ok or not ts_parser then
-			return verb_hl, target_hl
-		end
-
-		local tree = ts_parser:parse()[1]
-		if not tree then
-			return verb_hl, target_hl
-		end
-
-		local query_ok, hl_query = pcall(vim.treesitter.query.get, "sql", "highlights")
-		if not query_ok or not hl_query then
-			return verb_hl, target_hl
-		end
-
-		local root = tree:root()
-
-		-- Find first keyword (SELECT/INSERT/UPDATE/DELETE) and first identifier (table name)
-		local found_keyword = false
-		local found_identifier = false
-
-		for id, _ in hl_query:iter_captures(root, query, 0, -1) do
-			local name = hl_query.captures[id]
-
-			if not found_keyword and name:match("keyword") then
-				verb_hl = "@" .. name .. ".sql"
-				found_keyword = true
-			end
-
-			-- Look for identifier/table after keyword
-			if found_keyword and not found_identifier then
-				if name:match("variable") or name:match("identifier") or name:match("type") then
-					target_hl = "@" .. name .. ".sql"
-					found_identifier = true
-				end
-			end
-
-			if found_keyword and found_identifier then
-				break
-			end
-		end
-
-		return verb_hl, target_hl
-	end
-
 	--- Get query hints based on config
 	---@param query string
 	---@return string hints text
 	---@return table[] hint_positions {hint, symbol_start, symbol_end, value_start, value_end}
+	--- Append " <symbol>[ <value>]" to `result` and record its byte range in `positions`.
+	---@param result string
+	---@param positions table[]
+	---@param hint_name string
+	---@param symbol string
+	---@param value? string
+	---@return string
+	local function append_hint(result, positions, hint_name, symbol, value)
+		local symbol_start = #result + 1
+		result = result .. " " .. symbol
+		local pos = { hint = hint_name, symbol_start = symbol_start, symbol_end = #result }
+
+		if value then
+			pos.value_start = #result + 1
+			result = result .. " " .. value
+			pos.value_end = #result
+		end
+
+		table.insert(positions, pos)
+		return result
+	end
+
+	--- Match "<keyword> ident[.ident]" case-insensitively, preferring the part after a dot
+	--- (alias.column -> column).
+	---@param query string
+	---@param keyword string
+	---@return string|nil
+	local function match_column_after(query, keyword)
+		local lower = keyword:lower()
+		return query:match("%s" .. keyword .. "%s+[%w_]+%.([%w_]+)")
+			or query:match("%s" .. lower .. "%s+[%w_]+%.([%w_]+)")
+			or query:match("%s" .. keyword .. "%s+([%w_]+)")
+			or query:match("%s" .. lower .. "%s+([%w_]+)")
+	end
+
 	local function get_query_hints(query)
 		local hints = cfg.history.short_hints or {}
 		local hint_set = {}
+
 		for _, h in ipairs(hints) do
 			hint_set[h] = true
 		end
@@ -261,105 +263,37 @@ local function render_compact(entries, win_width, cfg)
 		local positions = {}
 		local upper_query = query:upper()
 
-		-- WHERE hint with column name
 		if hint_set["where"] and upper_query:match("%sWHERE%s") then
-			-- Extract first column name after WHERE (handles alias.column format)
-			local where_col = query:match("%sWHERE%s+[%w_]+%.([%w_]+)") -- alias.column -> column
-				or query:match("%swhere%s+[%w_]+%.([%w_]+)")
-				or query:match("%sWHERE%s+([%w_]+)") -- just column
-				or query:match("%swhere%s+([%w_]+)")
-			local symbol_start = #result + 1 -- after space
-			result = result .. " ?"
-			local symbol_end = #result
-			if where_col then
-				local value_start = #result + 1
-				result = result .. " " .. where_col
-				table.insert(positions, {
-					hint = "where",
-					symbol_start = symbol_start,
-					symbol_end = symbol_end,
-					value_start = value_start,
-					value_end = #result,
-				})
-			else
-				table.insert(positions, { hint = "where", symbol_start = symbol_start, symbol_end = symbol_end })
-			end
+			result = append_hint(result, positions, "where", "?", match_column_after(query, "WHERE"))
 		end
 
-		-- JOIN hint with table name
 		if hint_set["join"] and upper_query:match("%sJOIN%s") then
-			-- Extract joined table name
 			local join_table = query:match("%sJOIN%s+([%w_]+)") or query:match("%sjoin%s+([%w_]+)")
-			local symbol_start = #result + 1
-			result = result .. " ⋈"
-			local symbol_end = #result
-			if join_table then
-				local value_start = #result + 1
-				result = result .. " " .. join_table
-				table.insert(positions, {
-					hint = "join",
-					symbol_start = symbol_start,
-					symbol_end = symbol_end,
-					value_start = value_start,
-					value_end = #result,
-				})
-			else
-				table.insert(positions, { hint = "join", symbol_start = symbol_start, symbol_end = symbol_end })
-			end
+			result = append_hint(result, positions, "join", "⋈", join_table)
 		end
 
-		-- ORDER BY hint with column and direction
 		if hint_set["order"] then
-			local order_col = query:match("%sORDER%s+BY%s+[%w_]+%.([%w_]+)")
-				or query:match("%sorder%s+by%s+[%w_]+%.([%w_]+)")
-				or query:match("%sORDER%s+BY%s+([%w_]+)")
-				or query:match("%sorder%s+by%s+([%w_]+)")
+			local order_col = match_column_after(query, "ORDER%s+BY")
+
 			if order_col then
 				local direction = upper_query:match("%sORDER%s+BY%s+[%w_.]+%s+(DESC)") and "↓" or "↑"
-				local symbol_start = #result + 1
-				result = result .. " " .. direction
-				local symbol_end = #result
-				local value_start = #result + 1
-				result = result .. " " .. order_col
-				table.insert(positions, {
-					hint = "order",
-					symbol_start = symbol_start,
-					symbol_end = symbol_end,
-					value_start = value_start,
-					value_end = #result,
-				})
+				result = append_hint(result, positions, "order", direction, order_col)
 			end
 		end
 
-		-- GROUP BY hint with column
 		if hint_set["group"] then
-			local group_col = query:match("%sGROUP%s+BY%s+[%w_]+%.([%w_]+)")
-				or query:match("%sgroup%s+by%s+[%w_]+%.([%w_]+)")
-				or query:match("%sGROUP%s+BY%s+([%w_]+)")
-				or query:match("%sgroup%s+by%s+([%w_]+)")
+			local group_col = match_column_after(query, "GROUP%s+BY")
+
 			if group_col then
-				local symbol_start = #result + 1
-				result = result .. " ⊞"
-				local symbol_end = #result
-				local value_start = #result + 1
-				result = result .. " " .. group_col
-				table.insert(positions, {
-					hint = "group",
-					symbol_start = symbol_start,
-					symbol_end = symbol_end,
-					value_start = value_start,
-					value_end = #result,
-				})
+				result = append_hint(result, positions, "group", "⊞", group_col)
 			end
 		end
 
-		-- LIMIT hint (number only, no separate value)
 		if hint_set["limit"] then
 			local limit_num = upper_query:match("%sLIMIT%s+(%d+)")
+
 			if limit_num then
-				local symbol_start = #result + 1
-				result = result .. " ↓" .. limit_num
-				table.insert(positions, { hint = "limit", symbol_start = symbol_start, symbol_end = #result })
+				result = append_hint(result, positions, "limit", "↓" .. limit_num)
 			end
 		end
 
@@ -368,8 +302,8 @@ local function render_compact(entries, win_width, cfg)
 
 	-- Determine format to use
 	local format = cfg.history.format
+
 	if not format then
-		-- Auto format based on filter_by_connection
 		if cfg.history.filter_by_connection then
 			format = { "time", "query", "duration" }
 		else
@@ -379,6 +313,7 @@ local function render_compact(entries, win_width, cfg)
 
 	-- Check which fields are in format
 	local has_field = {}
+
 	for _, field in ipairs(format) do
 		has_field[field] = true
 	end
@@ -405,9 +340,10 @@ local function render_compact(entries, win_width, cfg)
 				else
 					line = line .. icon
 				end
+
 				table.insert(field_positions, { field = "icon", verb = verb, start = start_pos, finish = #line })
 			elseif field == "dbname" and entry.conn_name then
-				local fitted_name = fit_conn_name(entry.conn_name)
+				local fitted_name = fit_conn_name(entry.conn_name, true)
 				line = line .. fitted_name .. "] "
 				table.insert(field_positions, { field = "dbname", start = start_pos, finish = start_pos + #fitted_name })
 			elseif field == "time" then
@@ -420,9 +356,11 @@ local function render_compact(entries, win_width, cfg)
 
 				-- Determine display mode
 				local display_mode = cfg.history.query_display
+
 				if display_mode == "auto" then
 					-- Auto: use full if query fits, otherwise short
 					local full_query = entry.query:gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
+
 					if vim.fn.strdisplaywidth(full_query) <= available_width then
 						display_mode = "full"
 					else
@@ -436,28 +374,36 @@ local function render_compact(entries, win_width, cfg)
 				if display_mode == "full" then
 					-- Full query: normalize whitespace and truncate to fit
 					query_text = entry.query:gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
+
 					if vim.fn.strdisplaywidth(query_text) > available_width then
 						-- Truncate with ellipsis
 						local truncated = ""
 						local len = 0
+
 						for char_idx = 0, vim.fn.strchars(query_text) - 1 do
 							local char = vim.fn.strcharpart(query_text, char_idx, 1)
 							local char_width = vim.fn.strdisplaywidth(char)
+
 							if len + char_width + 1 > available_width then
 								break
 							end
+
 							truncated = truncated .. char
 							len = len + char_width
 						end
+
 						query_text = truncated .. "…"
 					end
+
 					use_full = true
 				else
 					-- Short: verb + target (e.g., "SEL users") + hints
 					query_text = verb .. " " .. target
 					hints_text, hint_positions = get_query_hints(entry.query)
 				end
+
 				line = line .. query_text .. hints_text
+
 				table.insert(field_positions, {
 					field = "query",
 					verb = verb,
@@ -511,14 +457,16 @@ local function render_compact(entries, win_width, cfg)
 					table.insert(r_highlights, {
 						line = line_idx,
 						hl = "treesitter_query",
-						col_start = pos.start,
-						col_end = pos.query_end,
+						start_line = line_idx,
+						first_line_offset = pos.start,
+						other_line_offset = pos.start,
 						query_text = r_lines[line_idx + 1]:sub(pos.start + 1, pos.query_end),
 					})
 				else
 					-- Short mode: parse original query and map highlights to short format
 					local verb_hl, target_hl = get_short_highlights(pos.full_query)
 					local verb_end = pos.start + #pos.verb
+
 					-- Verb highlight
 					table.insert(r_highlights, {
 						line = line_idx,
@@ -526,6 +474,7 @@ local function render_compact(entries, win_width, cfg)
 						col_start = pos.start,
 						col_end = verb_end,
 					})
+
 					-- Target highlight
 					if pos.target and #pos.target > 0 then
 						table.insert(r_highlights, {
@@ -535,6 +484,7 @@ local function render_compact(entries, win_width, cfg)
 							col_end = pos.query_end,
 						})
 					end
+
 					-- Hint highlights: symbol uses @keyword.sql, value uses @variable.member.sql
 					if pos.hints and #pos.hints > 0 then
 						for _, hint in ipairs(pos.hints) do
@@ -545,6 +495,7 @@ local function render_compact(entries, win_width, cfg)
 								col_start = pos.hints_offset + hint.symbol_start,
 								col_end = pos.hints_offset + hint.symbol_end,
 							})
+
 							-- Value highlight (column/table name) with @variable.member.sql
 							if hint.value_start and hint.value_end then
 								table.insert(r_highlights, {
@@ -578,30 +529,6 @@ local function render_detailed(entries, win_width, cfg)
 	local r_lines = {}
 	local r_highlights = {}
 	local r_line_map = {}
-
-	local CONN_NAME_WIDTH = 8
-	---@param name string
-	---@return string
-	local function fit_conn_name(name)
-		local display_len = vim.fn.strdisplaywidth(name)
-		if display_len > CONN_NAME_WIDTH then
-			local truncated = ""
-			local len = 0
-			for idx = 0, vim.fn.strchars(name) - 1 do
-				local char = vim.fn.strcharpart(name, idx, 1)
-				local char_width = vim.fn.strdisplaywidth(char)
-				if len + char_width + 1 > CONN_NAME_WIDTH then
-					break
-				end
-				truncated = truncated .. char
-				len = len + char_width
-			end
-			return truncated .. "…"
-		else
-			return name
-		end
-	end
-
 	local sep = " · "
 
 	for i, entry in ipairs(entries) do
@@ -638,28 +565,34 @@ local function render_detailed(entries, win_width, cfg)
 		local show_conn = not cfg.history.filter_by_connection
 
 		local meta_parts = {}
+
 		if show_conn then
 			local conn_icon = icons.db_default
-			local fitted_name = fit_conn_name(entry.conn_name or "unknown")
+			local fitted_name = fit_conn_name(entry.conn_name or "unknown", false)
 			table.insert(meta_parts, { text = conn_icon .. " " .. fitted_name, hl = "DbabHistoryConnName" })
 		end
+
 		table.insert(meta_parts, { text = time_str, hl = "DbabHistoryTime" })
+
 		if row_count and row_count > 0 then
 			local row_word = row_count == 1 and "row" or "rows"
 			table.insert(meta_parts, { text = "󰓫 " .. row_count .. " " .. row_word, hl = "DbabHistoryDuration" })
 		end
+
 		if duration ~= "" then
 			table.insert(meta_parts, { text = duration, hl = "DbabHistoryDuration" })
 		end
 
 		local meta_line = "  "
 		local meta_highlights = {}
+
 		for j, part in ipairs(meta_parts) do
 			if j > 1 then
 				local sep_start = #meta_line
 				meta_line = meta_line .. sep
 				table.insert(meta_highlights, { start = sep_start, finish = #meta_line, hl = "NonText" })
 			end
+
 			local part_start = #meta_line
 			meta_line = meta_line .. part.text
 			table.insert(meta_highlights, { start = part_start, finish = #meta_line, hl = part.hl })
@@ -669,6 +602,7 @@ local function render_detailed(entries, win_width, cfg)
 		local meta_line_idx = #r_lines - 1
 
 		table.insert(r_highlights, { line = meta_line_idx, hl = "NonText", col_start = 0, col_end = -1 })
+
 		for _, mh in ipairs(meta_highlights) do
 			table.insert(r_highlights, { line = meta_line_idx, hl = mh.hl, col_start = mh.start, col_end = mh.finish })
 		end
@@ -686,35 +620,48 @@ local function render_detailed(entries, win_width, cfg)
 	return r_lines, r_highlights, r_line_map
 end
 
---- Render the history buffer
+--- Get entries currently visible in the panel (respects filter_by_connection)
+---@return Dbab.HistoryEntry[]
+local function get_filtered_entries()
+	local cfg = config.get()
+	local all_entries = history.get_all()
+
+	if not cfg.history.filter_by_connection then
+		return all_entries
+	end
+
+	local current_conn = get_current_connection_name()
+
+	if not current_conn then
+		return {}
+	end
+
+	local filtered = {}
+
+	for _, entry in ipairs(all_entries) do
+		if entry.conn_name == current_conn then
+			table.insert(filtered, entry)
+		end
+	end
+
+	return filtered
+end
+
 function M.render()
 	if not M.buf or not vim.api.nvim_buf_is_valid(M.buf) then
 		return
 	end
 
 	local cfg = config.get()
-	local all_entries = history.get_all()
-	local entries = {}
-
-	if cfg.history.filter_by_connection then
-		local current_conn = get_current_connection_name()
-		if current_conn then
-			for _, entry in ipairs(all_entries) do
-				if entry.conn_name == current_conn then
-					table.insert(entries, entry)
-				end
-			end
-		end
-	else
-		entries = all_entries
-	end
-
+	local entries = get_filtered_entries()
 	local lines = {}
 	local highlights = {}
 
 	local winbar_text = "%#DbabHistoryHeader#" .. icons.history .. " " .. "History%*"
+
 	if cfg.history.filter_by_connection then
 		local current_conn = get_current_connection_name()
+
 		if current_conn then
 			local conn_icon = icons.db_default .. " "
 			winbar_text = "%#DbabHistoryHeader#"
@@ -734,15 +681,18 @@ function M.render()
 
 	-- History entries
 	local win_width = 30
+
 	if M.win and vim.api.nvim_win_is_valid(M.win) then
 		win_width = vim.api.nvim_win_get_width(M.win)
 	end
 
 	if #entries == 0 then
 		local empty_msg = "  No history yet"
+
 		if cfg.history.filter_by_connection and not get_current_connection_name() then
 			empty_msg = "  Connect to DB first"
 		end
+
 		table.insert(lines, empty_msg)
 		table.insert(highlights, { line = 0, hl = "Comment", col_start = 0, col_end = -1 })
 	else
@@ -756,9 +706,11 @@ function M.render()
 		end
 
 		M.entry_line_map = line_map
+
 		for _, l in ipairs(render_lines) do
 			table.insert(lines, l)
 		end
+
 		for _, h in ipairs(render_highlights) do
 			table.insert(highlights, h)
 		end
@@ -772,13 +724,10 @@ function M.render()
 	-- Apply highlights
 	local ns = vim.api.nvim_create_namespace("dbab_history")
 	vim.api.nvim_buf_clear_namespace(M.buf, ns, 0, -1)
+
 	for _, hl in ipairs(highlights) do
-		if hl.hl == "treesitter_query" and hl.query_text then
-			-- Apply single-line treesitter SQL syntax highlighting (compact mode)
-			apply_treesitter_highlights(M.buf, ns, hl.line, hl.col_start, hl.query_text)
-		elseif hl.hl == "treesitter_multiline" and hl.query_text then
-			-- Apply multi-line treesitter SQL syntax highlighting (detailed mode)
-			apply_multiline_treesitter_highlights(
+		if hl.query_text then
+			apply_treesitter_highlights(
 				M.buf,
 				ns,
 				hl.start_line,
@@ -792,30 +741,6 @@ function M.render()
 	end
 end
 
---- Get filtered entries (same logic as render)
----@return Dbab.HistoryEntry[]
-local function get_filtered_entries()
-	local cfg = config.get()
-	local all_entries = history.get_all()
-
-	if cfg.history.filter_by_connection then
-		local current_conn = get_current_connection_name()
-		if current_conn then
-			local filtered = {}
-			for _, entry in ipairs(all_entries) do
-				if entry.conn_name == current_conn then
-					table.insert(filtered, entry)
-				end
-			end
-			return filtered
-		end
-		return {}
-	end
-
-	return all_entries
-end
-
---- Get entry at current cursor position
 ---@return Dbab.HistoryEntry|nil, number|nil
 function M.get_entry_at_cursor()
 	if not M.win or not vim.api.nvim_win_is_valid(M.win) then
@@ -829,6 +754,7 @@ function M.get_entry_at_cursor()
 
 	-- Use entry_line_map to find which entry the cursor is on
 	local entry_idx = nil
+
 	if #M.entry_line_map > 0 then
 		for i, range in ipairs(M.entry_line_map) do
 			if line >= range.start and line <= range.finish then
@@ -848,7 +774,6 @@ function M.get_entry_at_cursor()
 	return nil, nil
 end
 
---- Setup keymaps for history buffer
 ---@param buf number
 function M.setup_keymaps(buf)
 	local opts = { buffer = buf, noremap = true, silent = true }
@@ -867,6 +792,7 @@ function M.setup_keymaps(buf)
 	-- Copy query
 	vim.keymap.set("n", keymaps.copy, function()
 		local entry = M.get_entry_at_cursor()
+
 		if entry then
 			vim.fn.setreg("+", entry.query)
 			vim.fn.setreg('"', entry.query)
@@ -877,6 +803,7 @@ function M.setup_keymaps(buf)
 	-- Delete entry
 	vim.keymap.set("n", keymaps.delete, function()
 		local entry, idx = M.get_entry_at_cursor()
+
 		if entry and idx then
 			vim.ui.select({ "Yes", "No" }, {
 				prompt = "Delete this history entry?",
@@ -892,10 +819,12 @@ function M.setup_keymaps(buf)
 	-- Clear history for current connection
 	vim.keymap.set("n", keymaps.clear, function()
 		local conn = get_current_connection_name()
+
 		if not conn then
 			vim.notify("[dbab] No active connection", vim.log.levels.WARN)
 			return
 		end
+
 		vim.ui.select({ "Yes", "No" }, {
 			prompt = "Clear history for " .. conn .. "?",
 		}, function(choice)
@@ -916,6 +845,7 @@ function M.setup_keymaps(buf)
 	-- S-Tab: To Result
 	vim.keymap.set("n", keymaps.to_result, function()
 		local workbench = require("dbab.ui.workbench")
+
 		if workbench.result_win and vim.api.nvim_win_is_valid(workbench.result_win) then
 			vim.api.nvim_set_current_win(workbench.result_win)
 		end
@@ -933,6 +863,7 @@ function M.on_select()
 	end
 
 	local cfg = config.get()
+
 	if cfg.history.on_select == "execute" then
 		M.execute_entry()
 	else
@@ -940,9 +871,9 @@ function M.on_select()
 	end
 end
 
---- Load entry into editor
 function M.load_entry()
 	local entry = M.get_entry_at_cursor()
+
 	if not entry then
 		return
 	end
@@ -951,9 +882,9 @@ function M.load_entry()
 	workbench.open_editor_with_query(entry.query)
 end
 
---- Execute entry immediately
 function M.execute_entry()
 	local entry = M.get_entry_at_cursor()
+
 	if not entry then
 		return
 	end
@@ -961,7 +892,6 @@ function M.execute_entry()
 	require("dbab.ui.workbench").run_history_entry(entry)
 end
 
---- Setup the history window
 ---@param win number
 function M.setup(win)
 	M.win = win
@@ -985,11 +915,11 @@ function M.setup(win)
 	M.render()
 end
 
---- Cleanup
 function M.cleanup()
 	if M.buf and vim.api.nvim_buf_is_valid(M.buf) then
 		pcall(vim.api.nvim_buf_delete, M.buf, { force = true })
 	end
+
 	M.buf = nil
 	M.win = nil
 	M.entry_line_map = {}

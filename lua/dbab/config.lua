@@ -91,6 +91,7 @@ M.defaults = {
 		editor = {
 			execute_insert = "<C-CR>",
 			execute_leader = "<Leader>r",
+			execute_current = "<Leader>e",
 			save = "<C-s>",
 			next_tab = "gt",
 			prev_tab = "gT",
