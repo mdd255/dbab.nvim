@@ -2042,19 +2042,19 @@ function M.setup_editor_keymaps(buf)
 	local opts = { noremap = true, silent = true, buffer = buf }
 	local keymaps = config.get().keymaps.editor
 
-	-- Enter: Execute query (Normal mode)
+	-- Enter: Execute query under cursor (Normal mode)
 	vim.keymap.set("n", config.get().keymaps.execute, function()
-		M.execute_query()
+		M.execute_current_query()
 	end, opts)
 
-	-- Ctrl+Enter: Execute query (Insert mode)
+	-- Ctrl+Enter: Execute query under cursor (Insert mode)
 	vim.keymap.set("i", keymaps.execute_insert, function()
-		M.execute_query()
+		M.execute_current_query()
 	end, opts)
 
-	-- Leader+r: Execute query
+	-- Leader+r: Execute query under cursor
 	vim.keymap.set("n", keymaps.execute_leader, function()
-		M.execute_query()
+		M.execute_current_query()
 	end, opts)
 
 	-- Leader+e: Execute query under cursor (blank-line delimited)
