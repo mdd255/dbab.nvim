@@ -274,11 +274,13 @@ end
 
 --- MongoDB shell queries must be prefixed with `db.` (e.g. `db.users.find()`).
 --- Auto-prepend it when missing so users can type `users.find()` instead.
+--- Only matches bare `identifier.method(...)` shorthand; leaves full scripts
+--- (print(...), try {}, var ..., etc., as used by schema.lua) untouched.
 ---@param url string
 ---@param query string
 ---@return string
 local function normalize_query(url, query)
-	if connection.parse_type(url) == "mongodb" and not query:match("^%s*db%.") then
+	if connection.parse_type(url) == "mongodb" and query:match("^%s*[%a_][%w_]*%s*%.") and not query:match("^%s*db%.") then
 		return "db." .. query
 	end
 
