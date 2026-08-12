@@ -1488,6 +1488,10 @@ local function get_query_block_at_cursor()
 	local row = vim.api.nvim_win_get_cursor(M.editor_win)[1]
 	local total = #lines
 
+	if vim.trim(lines[row] or "") == "" then
+		return {}
+	end
+
 	local start_row, end_row = row, row
 	while start_row > 1 and vim.trim(lines[start_row - 1]) ~= "" do
 		start_row = start_row - 1
