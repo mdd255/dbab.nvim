@@ -286,26 +286,12 @@ function M.refresh_result_winbar()
 
 	local winbar_text = "%#DbabHistoryHeader#" .. icons.result .. " Result%*"
 	if M.last_query then
-		-- Build prefix: [󰆼 dbname]
 		local prefix = ""
 		local prefix_display = ""
-		if M.last_conn_name then
-			prefix = "%#NonText#[%#DbabSidebarIconConnection#"
-				.. icons.db_default
-				.. " %#Normal#"
-				.. M.last_conn_name
-				.. "%#NonText#]%* "
-			prefix_display = "[" .. icons.db_default .. " " .. M.last_conn_name .. "] "
-		end
 
 		-- Build suffix first to calculate available space for query
 		local suffix_parts = {}
 		local suffix_display_parts = {}
-		if M.last_timestamp then
-			local time_str = os.date("%H:%M", M.last_timestamp)
-			table.insert(suffix_parts, "%#Comment#" .. icons.time .. " " .. time_str .. "%*")
-			table.insert(suffix_display_parts, icons.time .. " " .. time_str)
-		end
 		if M.last_result and M.last_result.row_count then
 			table.insert(
 				suffix_parts,
