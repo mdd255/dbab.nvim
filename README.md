@@ -241,6 +241,8 @@ require("dbab").setup({
       yank_all = "Y",
       to_sidebar = "<Tab>",
       to_editor = "<S-Tab>",
+      scroll_down = nil,  -- e.g. "m": scroll a full page down (<C-f>)
+      scroll_up = nil,    -- e.g. "M": scroll a full page up (<C-b>)
     },
   },
   highlights = {

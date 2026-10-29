@@ -217,6 +217,8 @@ keymaps ~
     - `result.yank_all`: Yank all rows (default: "Y")
     - `result.to_sidebar`: Move focus to sidebar (default: "<Tab>")
     - `result.to_editor`: Move focus to editor (default: "<S-Tab>")
+    - `result.scroll_down`: Scroll a full page down, <C-f> (default: unmapped)
+    - `result.scroll_up`: Scroll a full page up, <C-b> (default: unmapped)
 
                                                         *dbab-config-highlights*
 highlights ~

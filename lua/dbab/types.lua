@@ -109,6 +109,8 @@
 ---@field yank_all string Yank all rows as JSON
 ---@field to_sidebar string Move focus to sidebar
 ---@field to_editor string Move focus to editor
+---@field scroll_down? string Scroll down a full page (unmapped by default)
+---@field scroll_up? string Scroll up a full page (unmapped by default)
 
 -- Aliases for backward compatibility
 ---@alias DbabConfig Dbab.Config

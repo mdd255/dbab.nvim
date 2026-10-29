@@ -598,14 +598,15 @@ function M.create_new_tab(name, content, conn_name, is_saved)
 
 	local tab_name = name
 	if not tab_name then
-		local conn_prefix = conn:gsub("[^%w]", "-")
-		local count = 1
+		local conn_prefix = conn
+		local count = 0
 		for _, t in ipairs(M.query_tabs) do
-			if t.name:match("^" .. vim.pesc(conn_prefix) .. "%-") then
+			if t.name == conn_prefix or t.name:match("^" .. vim.pesc(conn_prefix) .. "%-%d+$") then
 				count = count + 1
 			end
 		end
-		tab_name = conn_prefix .. "-" .. count
+		-- first tab of a connection is just its name; later ones get a numeric suffix
+		tab_name = count == 0 and conn_prefix or (conn_prefix .. "-" .. (count + 1))
 	end
 
 	---@type Dbab.QueryTab
@@ -2280,6 +2281,14 @@ function M.setup_result_keymaps(buf)
 	vim.keymap.set("n", keymaps.yank_all, function()
 		M.yank_all_rows()
 	end, result_opts)
+
+	-- Full-page scroll (opt-in; overrides any global mapping of these keys in the result buffer)
+	if keymaps.scroll_down then
+		vim.keymap.set("n", keymaps.scroll_down, "<C-f>", result_opts)
+	end
+	if keymaps.scroll_up then
+		vim.keymap.set("n", keymaps.scroll_up, "<C-b>", result_opts)
+	end
 
 	-- Close
 	vim.keymap.set("n", config.get().keymaps.close, function()
