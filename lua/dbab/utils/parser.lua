@@ -120,7 +120,7 @@ local function render_vertical(table_result)
 	local lines = {}
 
 	for idx, row in ipairs(table_result.rows) do
-		table.insert(lines, string.format("-[ RECORD %d ]%s", idx, string.rep("-", 16)))
+		table.insert(lines, string.format("-[ RECORD %d ]%s", idx, string.rep("-", 50)))
 
 		for i, col in ipairs(table_result.columns) do
 			local padded = col .. string.rep(" ", col_width - #col)

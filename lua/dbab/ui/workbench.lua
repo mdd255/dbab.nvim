@@ -1135,7 +1135,7 @@ local function parse_mongodb_vertical(raw_lines)
 		end
 		if #fields > 0 then
 			record_num = record_num + 1
-			table.insert(vert_lines, string.format("-[ RECORD %d ]%s", record_num, string.rep("-", 16)))
+			table.insert(vert_lines, string.format("-[ RECORD %d ]%s", record_num, string.rep("-", 50)))
 			for _, f in ipairs(fields) do
 				local padded = f.key .. string.rep(" ", max_key_len - #f.key)
 				if type(f.value) == "table" then
