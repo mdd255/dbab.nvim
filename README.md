@@ -10,6 +10,7 @@ A lightweight database client for Neovim. Query databases directly from your edi
 - **Flexible layout**: Choose from presets or define your own pane arrangement
 - **Schema browser**: Navigate schemas, tables, and columns in sidebar
 - **Query editor**: Write and execute SQL with syntax highlighting
+- **Multi-query run**: Separate statements with `;` and run the buffer to get one result pane per query (equal vertical splits, run in parallel)
 - **Query history**: Track executed queries with timing, re-execute or load to editor
 - **Multiple query tabs**: Work with multiple queries simultaneously
 - **Save queries**: Store frequently used queries per connection

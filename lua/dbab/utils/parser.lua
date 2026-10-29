@@ -300,6 +300,70 @@ function M.parse_table(raw)
 	return result
 end
 
+--- Split text into statements on `;`, ignoring separators inside quotes
+--- ('...', "...", `...`), comments (-- and /* */) and dollar-quoted blocks.
+--- Statements are trimmed; empty and comment-only ones are dropped.
+---@param text string
+---@return string[]
+function M.split_statements(text)
+	local statements = {}
+	local start = 1
+	local has_code = false
+	local i = 1
+	local n = #text
+
+	local function flush(stop)
+		local stmt = vim.trim(text:sub(start, stop))
+
+		if has_code and stmt ~= "" then
+			table.insert(statements, stmt)
+		end
+
+		has_code = false
+	end
+
+	while i <= n do
+		local c = text:sub(i, i)
+		local two = text:sub(i, i + 1)
+
+		if two == "--" then
+			local eol = text:find("\n", i, true)
+			i = eol or n + 1
+		elseif two == "/*" then
+			local close = text:find("*/", i + 2, true)
+			i = close and close + 2 or n + 1
+		elseif c == "'" or c == '"' or c == "`" then
+			local close = text:find(c, i + 1, true)
+			has_code = true
+			i = close and close + 1 or n + 1
+		elseif c == "$" then
+			local tag = text:match("^%$[%w_]*%$", i)
+			has_code = true
+
+			if tag then
+				local close = text:find(tag, i + #tag, true)
+				i = close and close + #tag or n + 1
+			else
+				i = i + 1
+			end
+		elseif c == ";" then
+			flush(i - 1)
+			start = i + 1
+			i = i + 1
+		else
+			if not c:match("%s") then
+				has_code = true
+			end
+
+			i = i + 1
+		end
+	end
+
+	flush(n)
+
+	return statements
+end
+
 ---@param result Dbab.QueryResult
 ---@return number[] Column widths
 function M.calculate_column_widths(result)

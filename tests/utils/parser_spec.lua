@@ -243,4 +243,48 @@ line3]]
 			assert.are.equal(0, #widths)
 		end)
 	end)
+	describe("split_statements", function()
+		it("returns single statement without separator", function()
+			assert.are.same({ "SELECT 1" }, parser.split_statements("SELECT 1"))
+		end)
+
+		it("splits on semicolons and trims", function()
+			assert.are.same({ "SELECT 1", "SELECT 2" }, parser.split_statements("SELECT 1;\n SELECT 2 ;"))
+		end)
+
+		it("drops empty statements", function()
+			assert.are.same({ "SELECT 1" }, parser.split_statements(";; SELECT 1 ;;\n;"))
+			assert.are.same({}, parser.split_statements("  \n "))
+		end)
+
+		it("ignores semicolons inside quotes", function()
+			assert.are.same(
+				{ "SELECT 'a;b'", 'SELECT "c;d"', "SELECT `e;f`" },
+				parser.split_statements("SELECT 'a;b'; SELECT \"c;d\"; SELECT `e;f`")
+			)
+		end)
+
+		it("handles doubled quotes", function()
+			assert.are.same({ "SELECT 'it''s;ok'", "SELECT 2" }, parser.split_statements("SELECT 'it''s;ok'; SELECT 2"))
+		end)
+
+		it("ignores semicolons inside comments", function()
+			assert.are.same(
+				{ "SELECT 1 -- a;b\n, 2", "SELECT /* x;y */ 3" },
+				parser.split_statements("SELECT 1 -- a;b\n, 2; SELECT /* x;y */ 3")
+			)
+		end)
+
+		it("drops comment-only statements", function()
+			assert.are.same({ "SELECT 1" }, parser.split_statements("SELECT 1; -- done"))
+		end)
+
+		it("ignores semicolons inside dollar-quoted blocks", function()
+			assert.are.same(
+				{ "DO $$ BEGIN PERFORM 1; END $$", "SELECT 2" },
+				parser.split_statements("DO $$ BEGIN PERFORM 1; END $$; SELECT 2")
+			)
+			assert.are.same({ "SELECT $f$a;b$f$", "SELECT 2" }, parser.split_statements("SELECT $f$a;b$f$; SELECT 2"))
+		end)
+	end)
 end)

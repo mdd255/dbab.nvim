@@ -1295,6 +1295,181 @@ local function set_result_lines(lines, highlights)
 	end
 end
 
+-- Result panes: one vertical split per statement of a multi-query run.
+-- M.result_buf / M.result_win / M.last_* always alias the focused pane, so code
+-- written for a single result window keeps working.
+local PANE_FIELDS = {
+	"last_result",
+	"last_query",
+	"last_duration",
+	"last_conn_name",
+	"last_timestamp",
+	"last_result_width",
+}
+
+---@class Dbab.ResultPane
+---@field buf number
+---@field win number
+---@field run_id? number
+
+---@type Dbab.ResultPane[]
+M.result_panes = {}
+
+---@type Dbab.ResultPane|nil
+M._focused_pane = nil
+
+--- True while several results are being rendered: per-pane toasts and focus jumps are skipped.
+local quiet_results = false
+
+local run_counter = 0
+
+local function result_notify(msg, level, opts)
+	if quiet_results then
+		return
+	end
+
+	vim.notify(msg, level, opts)
+end
+
+---@param pane Dbab.ResultPane
+local function load_pane(pane)
+	M.result_buf = pane.buf
+	M.result_win = pane.win
+
+	for _, key in ipairs(PANE_FIELDS) do
+		M[key] = pane[key]
+	end
+end
+
+--- Run `fn` with the module aliases pointing at `pane`, then persist state back into it.
+---@param pane Dbab.ResultPane
+---@param fn function
+local function with_pane(pane, fn)
+	load_pane(pane)
+
+	local ok, err = pcall(fn)
+
+	for _, key in ipairs(PANE_FIELDS) do
+		pane[key] = M[key]
+	end
+
+	load_pane(M._focused_pane or M.result_panes[1] or pane)
+
+	if not ok then
+		error(err, 0)
+	end
+end
+
+---@return number
+local function create_result_buf()
+	local buf = vim.api.nvim_create_buf(false, true)
+
+	vim.api.nvim_buf_set_option(buf, "filetype", "dbab_result")
+	vim.api.nvim_buf_set_option(buf, "buftype", "nofile")
+	vim.api.nvim_buf_set_option(buf, "buflisted", false)
+	vim.api.nvim_buf_set_option(buf, "modifiable", false)
+
+	return buf
+end
+
+---@param win number
+local function configure_result_win(win)
+	vim.api.nvim_win_set_option(win, "cursorline", true)
+	vim.api.nvim_win_set_option(win, "wrap", false)
+	vim.api.nvim_win_set_option(win, "number", config.get().result.show_line_number)
+	vim.api.nvim_win_set_option(win, "relativenumber", false)
+end
+
+local function equalize_result_panes()
+	local panes = M.result_panes
+	local count = #panes
+
+	if count < 2 then
+		if count == 1 then
+			vim.api.nvim_win_set_option(panes[1].win, "winfixwidth", false)
+		end
+		return
+	end
+
+	-- vertical separators take one column each
+	local total = count - 1
+	for _, pane in ipairs(panes) do
+		total = total + vim.api.nvim_win_get_width(pane.win)
+	end
+
+	-- 'winwidth' would otherwise widen the focused pane at its neighbours' expense
+	for _, pane in ipairs(panes) do
+		vim.api.nvim_win_set_option(pane.win, "winfixwidth", false)
+	end
+
+	local each = math.floor((total - (count - 1)) / count)
+	for i = 1, count - 1 do
+		pcall(vim.api.nvim_win_set_width, panes[i].win, each)
+	end
+
+	for _, pane in ipairs(panes) do
+		vim.api.nvim_win_set_option(pane.win, "winfixwidth", true)
+	end
+end
+
+--- Make exactly `n` result panes, side by side with equal widths.
+---@param n number
+function M.ensure_result_panes(n)
+	local panes = M.result_panes
+
+	if #panes == 0 then
+		return
+	end
+
+	local prev_win = vim.api.nvim_get_current_win()
+
+	while #panes < n do
+		vim.api.nvim_set_current_win(panes[#panes].win)
+		vim.cmd("rightbelow vsplit")
+
+		local win = vim.api.nvim_get_current_win()
+		local buf = create_result_buf()
+		vim.api.nvim_win_set_buf(win, buf)
+		configure_result_win(win)
+
+		table.insert(panes, { buf = buf, win = win })
+		M.setup_result_keymaps(buf)
+	end
+
+	while #panes > n do
+		local pane = table.remove(panes)
+
+		if M._focused_pane == pane then
+			M._focused_pane = panes[1]
+		end
+
+		pcall(vim.api.nvim_win_close, pane.win, true)
+		pcall(vim.api.nvim_buf_delete, pane.buf, { force = true })
+	end
+
+	equalize_result_panes()
+
+	if vim.api.nvim_win_is_valid(prev_win) then
+		vim.api.nvim_set_current_win(prev_win)
+	end
+
+	load_pane(M._focused_pane or panes[1])
+end
+
+--- Refresh the winbar of every result pane.
+function M.refresh_all_result_winbars()
+	if #M.result_panes == 0 then
+		M.refresh_result_winbar()
+		return
+	end
+
+	for _, pane in ipairs(M.result_panes) do
+		if vim.api.nvim_win_is_valid(pane.win) then
+			with_pane(pane, M.refresh_result_winbar)
+		end
+	end
+end
+
 ---@param raw string
 ---@param elapsed number
 function M.show_result(raw, elapsed)
@@ -1309,7 +1484,7 @@ function M.show_result(raw, elapsed)
 
 	if is_error_result(raw) then
 		set_result_lines(format_error(raw))
-		vim.notify("[dbab] Query error", vim.log.levels.ERROR, { replace = notif_handle })
+		result_notify("[dbab] Query error", vim.log.levels.ERROR, { replace = notif_handle })
 		return
 	end
 
@@ -1321,7 +1496,7 @@ function M.show_result(raw, elapsed)
 
 		local status_msg = count and string.format(" %s: %d rows (%.1fms) ", verb, count, elapsed)
 			or string.format(" %s successful (%.1fms) ", verb, elapsed)
-		vim.notify(status_msg, vim.log.levels.INFO, { replace = notif_handle })
+		result_notify(status_msg, vim.log.levels.INFO, { replace = notif_handle })
 		return
 	end
 
@@ -1349,7 +1524,7 @@ function M.show_result(raw, elapsed)
 		M.last_result = { columns = {}, rows = {}, row_count = #raw_lines, raw = raw }
 		M.refresh_result_winbar()
 		local status = string.format(" Result: %d lines (%.1fms) ", #raw_lines, elapsed)
-		vim.notify(status, vim.log.levels.INFO, { replace = notif_handle })
+		result_notify(status, vim.log.levels.INFO, { replace = notif_handle })
 		return
 	end
 
@@ -1375,7 +1550,7 @@ function M.show_result(raw, elapsed)
 				M.last_result = { columns = {}, rows = {}, row_count = record_count, raw = table.concat(vert_lines, "\n") }
 				M.refresh_result_winbar()
 				local status = string.format(" Result: %d documents (%.1fms) ", record_count, elapsed)
-				vim.notify(status, vim.log.levels.INFO, { replace = notif_handle })
+				result_notify(status, vim.log.levels.INFO, { replace = notif_handle })
 				return
 			end
 			-- Fall through to jsonc if vertical parse failed
@@ -1390,14 +1565,14 @@ function M.show_result(raw, elapsed)
 		M.last_result = result
 		M.refresh_result_winbar()
 		local status = string.format(" Result (%.1fms) ", elapsed)
-		vim.notify(status, vim.log.levels.INFO, { replace = notif_handle })
+		result_notify(status, vim.log.levels.INFO, { replace = notif_handle })
 		return
 	end
 
 	if result.row_count == 0 then
 		vim.api.nvim_buf_set_lines(M.result_buf, 0, -1, false, { "No results returned" })
 		vim.api.nvim_buf_set_option(M.result_buf, "modifiable", false)
-		vim.notify(string.format(" No results (%.1fms) ", elapsed), vim.log.levels.INFO, { replace = notif_handle })
+		result_notify(string.format(" No results (%.1fms) ", elapsed), vim.log.levels.INFO, { replace = notif_handle })
 		return
 	end
 
@@ -1412,7 +1587,7 @@ function M.show_result(raw, elapsed)
 		vim.api.nvim_buf_set_lines(M.result_buf, 0, -1, false, raw_lines)
 		vim.api.nvim_buf_set_option(M.result_buf, "modifiable", false)
 		M.refresh_result_winbar()
-		vim.notify(string.format(" Result (%.1fms) ", elapsed), vim.log.levels.INFO, { replace = notif_handle })
+		result_notify(string.format(" Result (%.1fms) ", elapsed), vim.log.levels.INFO, { replace = notif_handle })
 		return
 	end
 
@@ -1425,7 +1600,7 @@ function M.show_result(raw, elapsed)
 			vim.api.nvim_buf_set_option(M.result_buf, "filetype", "json")
 		end
 		M.refresh_result_winbar()
-		vim.notify(string.format(" Result (%.1fms) ", elapsed), vim.log.levels.INFO, { replace = notif_handle })
+		result_notify(string.format(" Result (%.1fms) ", elapsed), vim.log.levels.INFO, { replace = notif_handle })
 		return
 	end
 
@@ -1436,7 +1611,7 @@ function M.show_result(raw, elapsed)
 		apply_vertical_highlights(M.result_buf, vert_lines)
 
 		M.refresh_result_winbar()
-		vim.notify(string.format(" Result (%.1fms) ", elapsed), vim.log.levels.INFO, { replace = notif_handle })
+		result_notify(string.format(" Result (%.1fms) ", elapsed), vim.log.levels.INFO, { replace = notif_handle })
 		return
 	end
 
@@ -1449,7 +1624,7 @@ function M.show_result(raw, elapsed)
 			vim.api.nvim_buf_set_option(M.result_buf, "filetype", "markdown")
 		end
 		M.refresh_result_winbar()
-		vim.notify(string.format(" Result (%.1fms) ", elapsed), vim.log.levels.INFO, { replace = notif_handle })
+		result_notify(string.format(" Result (%.1fms) ", elapsed), vim.log.levels.INFO, { replace = notif_handle })
 		return
 	end
 
@@ -1470,9 +1645,9 @@ function M.show_result(raw, elapsed)
 	M.refresh_result_winbar()
 
 	local status = string.format(" Result: %d rows (%.1fms) ", result.row_count, elapsed)
-	vim.notify(status, vim.log.levels.INFO, { replace = notif_handle })
+	result_notify(status, vim.log.levels.INFO, { replace = notif_handle })
 
-	if M.result_win and vim.api.nvim_win_is_valid(M.result_win) then
+	if not quiet_results and M.result_win and vim.api.nvim_win_is_valid(M.result_win) then
 		vim.api.nvim_set_current_win(M.result_win)
 		pcall(vim.api.nvim_win_set_cursor, M.result_win, { 2, 0 })
 		vim.cmd("stopinsert")
@@ -1503,11 +1678,9 @@ local function get_query_block_at_cursor()
 	return vim.list_slice(lines, start_row, end_row)
 end
 
----@param query string
-local function run_query_text(query)
-	query = vim.trim(query)
-
-	if query == "" then
+---@param statements string[]
+local function run_statements(statements)
+	if #statements == 0 or (#statements == 1 and vim.trim(statements[1]) == "") then
 		vim.notify("[dbab] Empty query", vim.log.levels.WARN)
 		return
 	end
@@ -1518,53 +1691,119 @@ local function run_query_text(query)
 		return
 	end
 
-	table.insert(M.history, 1, query)
-	if #M.history > 100 then
+	for _, query in ipairs(statements) do
+		table.insert(M.history, 1, query)
+	end
+	while #M.history > 100 do
 		table.remove(M.history)
 	end
 	M.history_index = 0
 
-	M._executing_notif = vim.notify("[dbab] Executing query...", vim.log.levels.INFO, { timeout = false })
+	local count = #statements
+	local multi = count > 1
 
-	local start_time = vim.loop.hrtime()
-	executor.execute_async(url, query, function(result, err)
-		local elapsed = (vim.loop.hrtime() - start_time) / 1e6
+	run_counter = run_counter + 1
+	local run_id = run_counter
 
-		if err then
-			result = result ~= "" and result or err
+	M.ensure_result_panes(count)
+	local panes = vim.list_slice(M.result_panes, 1, count)
+
+	local exec_msg = multi and string.format("[dbab] Executing %d queries...", count) or "[dbab] Executing query..."
+	local exec_notif = vim.notify(exec_msg, vim.log.levels.INFO, { timeout = false })
+	if not multi then
+		M._executing_notif = exec_notif
+	end
+
+	local pending = count
+	local failed = 0
+
+	for idx, query in ipairs(statements) do
+		local pane = panes[idx]
+		if pane then
+			pane.run_id = run_id
 		end
 
-		local parsed_result = parser.parse(result)
-		if not is_error_result(result) then
-			query_history.add({
-				query = query,
-				timestamp = os.time(),
-				conn_name = conn_name or "unknown",
-				duration_ms = elapsed,
-				row_count = parsed_result and parsed_result.row_count or 0,
-			})
-		end
+		local start_time = vim.loop.hrtime()
+		executor.execute_async(url, query, function(result, err)
+			local elapsed = (vim.loop.hrtime() - start_time) / 1e6
 
-		if M.history_win and vim.api.nvim_win_is_valid(M.history_win) then
-			get_history_ui().render()
-		end
+			if err then
+				result = result ~= "" and result or err
+			end
 
-		M.last_query = query
-		M.last_duration = elapsed
-		M.last_conn_name = conn_name
-		M.last_timestamp = os.time()
-		M.show_result(result, elapsed)
-	end)
+			local is_error = is_error_result(result)
+			local parsed_result = parser.parse(result)
+			if not is_error then
+				query_history.add({
+					query = query,
+					timestamp = os.time(),
+					conn_name = conn_name or "unknown",
+					duration_ms = elapsed,
+					row_count = parsed_result and parsed_result.row_count or 0,
+				})
+			end
+
+			if M.history_win and vim.api.nvim_win_is_valid(M.history_win) then
+				get_history_ui().render()
+			end
+
+			-- pane may be gone or reused by a newer run while the query was in flight
+			if pane and pane.run_id == run_id and vim.api.nvim_win_is_valid(pane.win) then
+				pane.last_query = query
+				pane.last_duration = elapsed
+				pane.last_conn_name = conn_name
+				pane.last_timestamp = os.time()
+
+				quiet_results = multi
+				local ok, show_err = pcall(with_pane, pane, function()
+					M.show_result(result, elapsed)
+				end)
+				quiet_results = false
+
+				if not ok then
+					vim.notify("[dbab] Render failed: " .. tostring(show_err), vim.log.levels.ERROR)
+				end
+			end
+
+			if is_error then
+				failed = failed + 1
+			end
+			pending = pending - 1
+
+			if multi and pending == 0 then
+				local summary = string.format(" %d queries done", count)
+				if failed > 0 then
+					summary = summary .. string.format(", %d failed", failed)
+				end
+
+				vim.notify(summary .. " ", failed > 0 and vim.log.levels.WARN or vim.log.levels.INFO, { replace = exec_notif })
+
+				local first = panes[1]
+				if first and first.run_id == run_id and vim.api.nvim_win_is_valid(first.win) then
+					vim.api.nvim_set_current_win(first.win)
+					pcall(vim.api.nvim_win_set_cursor, first.win, { 2, 0 })
+					vim.cmd("stopinsert")
+				end
+			end
+		end)
+	end
 end
 
---- Execute the whole editor buffer as a single query.
+--- Execute the editor buffer. Statements separated by `;` run in parallel, each
+--- shown in its own result pane; a buffer without separators runs as is.
 function M.execute_query()
 	if not M.editor_buf or not vim.api.nvim_buf_is_valid(M.editor_buf) then
 		return
 	end
 
-	local lines = vim.api.nvim_buf_get_lines(M.editor_buf, 0, -1, false)
-	run_query_text(table.concat(lines, "\n"))
+	local text = table.concat(vim.api.nvim_buf_get_lines(M.editor_buf, 0, -1, false), "\n")
+	local statements = parser.split_statements(text)
+
+	if #statements <= 1 then
+		statements = { vim.trim(text) }
+	end
+
+	run_statements(statements)
 end
 
 --- Execute only the query block under the cursor (queries are separated by
@@ -1578,7 +1817,7 @@ function M.execute_current_query()
 	end
 
 	local block = get_query_block_at_cursor()
-	run_query_text(table.concat(block, "\n"))
+	run_statements({ vim.trim(table.concat(block, "\n")) })
 end
 
 ---@return number|nil
@@ -1723,8 +1962,6 @@ end
 --- Initialize all components in their windows
 ---@param windows table<string, number> Component name -> window handle
 function M._init_all_components(windows)
-	local cfg = config.get()
-
 	-- Sidebar
 	if windows.sidebar then
 		M.sidebar_win = windows.sidebar
@@ -1746,18 +1983,13 @@ function M._init_all_components(windows)
 	-- Grid (Result)
 	if windows.result then
 		M.result_win = windows.result
-		M.result_buf = vim.api.nvim_create_buf(false, true)
+		M.result_buf = create_result_buf()
 		vim.api.nvim_win_set_buf(M.result_win, M.result_buf)
 		pcall(vim.api.nvim_buf_set_name, M.result_buf, "Result")
-		vim.api.nvim_buf_set_option(M.result_buf, "filetype", "dbab_result")
-		vim.api.nvim_buf_set_option(M.result_buf, "buftype", "nofile")
-		vim.api.nvim_buf_set_option(M.result_buf, "buflisted", false)
-		vim.api.nvim_buf_set_option(M.result_buf, "modifiable", false)
-		vim.api.nvim_win_set_option(M.result_win, "cursorline", true)
-		vim.api.nvim_win_set_option(M.result_win, "wrap", false)
-		vim.api.nvim_win_set_option(M.result_win, "number", cfg.result.show_line_number)
-		vim.api.nvim_win_set_option(M.result_win, "relativenumber", false)
-		M.setup_result_keymaps()
+		configure_result_win(M.result_win)
+		M.result_panes = { { buf = M.result_buf, win = M.result_win } }
+		M._focused_pane = M.result_panes[1]
+		M.setup_result_keymaps(M.result_buf)
 		vim.schedule(function()
 			M.refresh_result_winbar()
 		end)
@@ -1793,6 +2025,23 @@ function M._setup_autocmds()
 			end
 
 			local closed_win = tonumber(ev.match)
+			if #M.result_panes > 1 then
+				for i, pane in ipairs(M.result_panes) do
+					if pane.win == closed_win then
+						table.remove(M.result_panes, i)
+						if M._focused_pane == pane then
+							M._focused_pane = M.result_panes[1]
+						end
+						vim.schedule(function()
+							pcall(vim.api.nvim_buf_delete, pane.buf, { force = true })
+							if M._focused_pane then
+								load_pane(M._focused_pane)
+							end
+						end)
+						break
+					end
+				end
+			end
 			if closed_win == M.editor_win then
 				M.editor_win = nil
 				M.editor_buf = nil
@@ -1813,8 +2062,9 @@ function M._setup_autocmds()
 		callback = function()
 			if M.tab_nr and vim.api.nvim_get_current_tabpage() == M.tab_nr then
 				M._resize_layout()
+				equalize_result_panes()
 				get_history_ui().render()
-				M.refresh_result_winbar()
+				M.refresh_all_result_winbars()
 			end
 		end,
 	})
@@ -1824,7 +2074,21 @@ function M._setup_autocmds()
 		callback = function()
 			if M.tab_nr and vim.api.nvim_get_current_tabpage() == M.tab_nr then
 				get_history_ui().render()
-				M.refresh_result_winbar()
+				M.refresh_all_result_winbars()
+			end
+		end,
+	})
+
+	vim.api.nvim_create_autocmd("WinEnter", {
+		group = augroup,
+		callback = function()
+			local win = vim.api.nvim_get_current_win()
+			for _, pane in ipairs(M.result_panes) do
+				if pane.win == win then
+					M._focused_pane = pane
+					load_pane(pane)
+					return
+				end
 			end
 		end,
 	})
@@ -1999,12 +2263,14 @@ function M.setup_global_buf_keymaps(buf)
 	end
 end
 
-function M.setup_result_keymaps()
-	if not M.result_buf then
+---@param buf? number defaults to the focused result buffer
+function M.setup_result_keymaps(buf)
+	buf = buf or M.result_buf
+	if not buf then
 		return
 	end
 
-	local result_opts = { noremap = true, silent = true, buffer = M.result_buf }
+	local result_opts = { noremap = true, silent = true, buffer = buf }
 	local keymaps = config.get().keymaps.result
 
 	-- S-Tab: To Editor
@@ -2029,7 +2295,7 @@ function M.setup_result_keymaps()
 		M.close()
 	end, result_opts)
 
-	M.setup_global_buf_keymaps(M.result_buf)
+	M.setup_global_buf_keymaps(buf)
 end
 
 --- Setup keymaps for a specific editor buffer
@@ -2189,6 +2455,8 @@ function M.cleanup()
 	M.editor_win = nil
 	M.result_buf = nil
 	M.result_win = nil
+	M.result_panes = {}
+	M._focused_pane = nil
 	M.history_buf = nil
 	M.history_win = nil
 	M._placeholder_buf = nil
