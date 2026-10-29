@@ -1789,14 +1789,9 @@ local function run_statements(statements)
 	end
 end
 
---- Execute the editor buffer. Statements separated by `;` run in parallel, each
---- shown in its own result pane; a buffer without separators runs as is.
-function M.execute_query()
-	if not M.editor_buf or not vim.api.nvim_buf_is_valid(M.editor_buf) then
-		return
-	end
-
-	local text = table.concat(vim.api.nvim_buf_get_lines(M.editor_buf, 0, -1, false), "\n")
+--- Split text on `;` and run it; text without separators runs as is.
+---@param text string
+local function run_text(text)
 	local statements = parser.split_statements(text)
 
 	if #statements <= 1 then
@@ -1806,8 +1801,18 @@ function M.execute_query()
 	run_statements(statements)
 end
 
---- Execute only the query block under the cursor (queries are separated by
---- blank lines in the editor).
+--- Execute the editor buffer. Statements separated by `;` run in parallel, each
+--- shown in its own result pane; a buffer without separators runs as is.
+function M.execute_query()
+	if not M.editor_buf or not vim.api.nvim_buf_is_valid(M.editor_buf) then
+		return
+	end
+
+	run_text(table.concat(vim.api.nvim_buf_get_lines(M.editor_buf, 0, -1, false), "\n"))
+end
+
+--- Execute only the query block under the cursor (blocks are separated by
+--- blank lines in the editor). `;`-separated statements in it get one pane each.
 function M.execute_current_query()
 	if not M.editor_buf or not vim.api.nvim_buf_is_valid(M.editor_buf) then
 		return
@@ -1817,7 +1822,7 @@ function M.execute_current_query()
 	end
 
 	local block = get_query_block_at_cursor()
-	run_statements({ vim.trim(table.concat(block, "\n")) })
+	run_text(table.concat(block, "\n"))
 end
 
 ---@return number|nil
