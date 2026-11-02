@@ -20,3 +20,5 @@ luacov.report.out
 .exrc
 config.bat
 node_modules
+
+.vscode
