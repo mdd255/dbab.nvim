@@ -1246,7 +1246,7 @@ local function apply_vertical_highlights(bufnr, lines)
 	for i, line in ipairs(lines) do
 		local ln = i - 1
 		if line:match("^%-%[ RECORD %d+") then
-			vim.api.nvim_buf_add_highlight(bufnr, RESULT_NS, "DbabHeader", ln, 0, -1)
+			vim.api.nvim_buf_add_highlight(bufnr, RESULT_NS, "DbabRecordSep", ln, 0, -1)
 		else
 			local sep = line:find(" | ")
 			if sep then
