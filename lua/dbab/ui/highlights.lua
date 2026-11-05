@@ -61,7 +61,7 @@ function M.setup()
 	vim.api.nvim_set_hl(0, "DbabHeader", { bg = header_bg, fg = "#000000", bold = true })
 
 	-- Record separator (vertical view): gray bg
-	vim.api.nvim_set_hl(0, "DbabRecordSep", { bg = "#5c6370", fg = "#ffffff", bold = true })
+	vim.api.nvim_set_hl(0, "DbabRecordSep", { bg = "#3e4451", fg = "#000000", bold = true })
 
 	local highlights = {
 		-- Window
